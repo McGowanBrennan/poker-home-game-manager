@@ -1,0 +1,204 @@
+.landing-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.landing-content {
+  text-align: center;
+  color: white;
+  max-width: 600px;
+}
+
+.site-title {
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin: 0 0 20px 0;
+  text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
+  line-height: 1.2;
+}
+
+.site-subtitle {
+  font-size: 1.3rem;
+  margin: 0 0 60px 0;
+  opacity: 0.95;
+  font-weight: 300;
+}
+
+.landing-buttons {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.landing-btn {
+  padding: 18px 45px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  min-width: 180px;
+}
+
+.login-btn {
+  background: white;
+  color: #667eea;
+}
+
+.login-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+  background: #f8f8f8;
+}
+
+.signup-btn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+}
+
+.signup-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(135deg, #0ea370 0%, #047857 100%);
+}
+
+.landing-btn:active {
+  transform: translateY(0);
+}
+
+/* Responsive Styles */
+
+/* Tablets and small laptops */
+@media (max-width: 992px) {
+  .site-title {
+    font-size: 3rem;
+  }
+
+  .site-subtitle {
+    font-size: 1.2rem;
+    margin-bottom: 50px;
+  }
+
+  .landing-content {
+    max-width: 500px;
+  }
+}
+
+/* Tablets and large phones */
+@media (max-width: 768px) {
+  .landing-page {
+    padding: 15px;
+  }
+
+  .site-title {
+    font-size: 2.5rem;
+    margin-bottom: 15px;
+  }
+
+  .site-subtitle {
+    font-size: 1.1rem;
+    margin-bottom: 40px;
+  }
+
+  .landing-content {
+    max-width: 450px;
+  }
+
+  .landing-buttons {
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .landing-btn {
+    width: 100%;
+    max-width: 280px;
+    padding: 16px 40px;
+    font-size: 1.1rem;
+  }
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  .landing-page {
+    padding: 10px;
+  }
+
+  .site-title {
+    font-size: 2rem;
+    margin-bottom: 12px;
+    word-break: break-word;
+  }
+
+  .site-subtitle {
+    font-size: 1rem;
+    margin-bottom: 35px;
+  }
+
+  .landing-content {
+    max-width: 100%;
+    padding: 0 10px;
+  }
+
+  .landing-btn {
+    padding: 14px 35px;
+    font-size: 1rem;
+    max-width: 100%;
+    min-width: unset;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  .site-title {
+    font-size: 1.75rem;
+    line-height: 1.3;
+  }
+
+  .site-subtitle {
+    font-size: 0.95rem;
+    margin-bottom: 30px;
+  }
+
+  .landing-btn {
+    padding: 12px 30px;
+    font-size: 0.95rem;
+  }
+
+  .landing-buttons {
+    gap: 12px;
+  }
+}
+
+/* Landscape mode on phones */
+@media (max-height: 600px) and (orientation: landscape) {
+  .landing-page {
+    padding: 10px;
+  }
+
+  .site-title {
+    font-size: 2rem;
+    margin-bottom: 10px;
+  }
+
+  .site-subtitle {
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+  }
+
+  .landing-buttons {
+    gap: 10px;
+  }
+
+  .landing-btn {
+    padding: 10px 30px;
+    font-size: 0.95rem;
+  }
+}
+

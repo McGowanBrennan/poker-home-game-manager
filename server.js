@@ -1,0 +1,663 @@
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const cron = require('node-cron');
+const db = require('./db');
+require('dotenv').config();
+
+const app = express();
+const PORT = 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Helper function to hash passwords
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+// Helper function to generate game code
+function generateGameCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+// Helper function to generate group ID
+function generateGroupId() {
+  return Math.random().toString(36).substring(2, 12).toUpperCase();
+}
+
+// ========== USER ENDPOINTS ==========
+
+// Register a new user
+app.post('/api/users/register', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Check if user already exists
+    const existingUser = await db.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    // Hash password and create user
+    const hashedPassword = hashPassword(password);
+    await db.query(
+      'INSERT INTO users (email, password) VALUES ($1, $2)',
+      [email, hashedPassword]
+    );
+
+    res.status(201).json({ message: 'User registered successfully', email });
+  } catch (error) {
+    console.error('Error registering user:', error);
+    res.status(500).json({ error: 'Failed to register user' });
+  }
+});
+
+// Login user
+app.post('/api/users/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Find user
+    const result = await db.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      console.log('User not found:', email);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const user = result.rows[0];
+    const hashedPassword = hashPassword(password);
+
+    console.log('Login attempt - Email:', email);
+    console.log('Stored password hash:', user.password);
+    console.log('Provided password hash:', hashedPassword);
+    console.log('Passwords match:', user.password === hashedPassword);
+
+    if (user.password !== hashedPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    res.json({ message: 'Login successful', email: user.email });
+  } catch (error) {
+    console.error('Error logging in:', error);
+    console.error('Error details:', error.message);
+    res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+// ========== GAME ENDPOINTS ==========
+
+// Create a new game
+app.post('/api/games', async (req, res) => {
+  try {
+    const { name, createdBy, gameDateTime, note } = req.body;
+
+    if (!name || !createdBy) {
+      return res.status(400).json({ error: 'Name and createdBy are required' });
+    }
+
+    const gameId = generateGameCode();
+
+    await db.query(
+      'INSERT INTO games (id, name, created_by, game_date_time, note) VALUES ($1, $2, $3, $4::timestamp, $5)',
+      [gameId, name, createdBy, gameDateTime || null, note || null]
+    );
+
+    res.status(201).json({
+      message: 'Game created successfully',
+      game: {
+        id: gameId,
+        name,
+        createdBy,
+        gameDateTime,
+        note,
+        reservations: {}
+      }
+    });
+  } catch (error) {
+    console.error('Error creating game:', error);
+    res.status(500).json({ error: 'Failed to create game' });
+  }
+});
+
+// Get all games (filtered by user if userEmail provided)
+app.get('/api/games', async (req, res) => {
+  try {
+    const { userEmail } = req.query;
+    
+    let query = 'SELECT * FROM games';
+    let params = [];
+    
+    if (userEmail) {
+      query += ' WHERE created_by = $1';
+      params = [userEmail];
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const result = await db.query(query, params);
+    
+    res.json(result.rows.map(game => ({
+      id: game.id,
+      name: game.name,
+      createdBy: game.created_by,
+      createdAt: game.created_at,
+      gameDateTime: game.game_date_time,
+      note: game.note
+    })));
+  } catch (error) {
+    console.error('Error fetching games:', error);
+    res.status(500).json({ error: 'Failed to fetch games' });
+  }
+});
+
+// Get a specific game
+app.get('/api/games/:gameId', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+
+    const result = await db.query(
+      'SELECT * FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    const game = result.rows[0];
+    res.json({
+      id: game.id,
+      name: game.name,
+      createdBy: game.created_by,
+      createdAt: game.created_at,
+      gameDateTime: game.game_date_time,
+      note: game.note
+    });
+  } catch (error) {
+    console.error('Error fetching game:', error);
+    res.status(500).json({ error: 'Failed to fetch game' });
+  }
+});
+
+// Delete a game (only by creator)
+app.delete('/api/games/:gameId', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { userEmail } = req.body;
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can delete this game' });
+    }
+
+    // Delete all reservations for this game first
+    await db.query(
+      'DELETE FROM reservations WHERE game_id = $1',
+      [gameId]
+    );
+
+    // Delete the game
+    await db.query(
+      'DELETE FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Game deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting game:', error);
+    console.error('Error details:', error.message);
+    res.status(500).json({ error: 'Failed to delete game' });
+  }
+});
+
+// ========== RESERVATION ENDPOINTS ==========
+
+// Get reservations for a specific game
+app.get('/api/games/:gameId/reservations', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+
+    const result = await db.query(
+      'SELECT seat_id, player_name FROM reservations WHERE game_id = $1',
+      [gameId]
+    );
+
+    // Convert to object format {seatId: playerName}
+    const reservations = {};
+    result.rows.forEach(row => {
+      reservations[row.seat_id] = row.player_name;
+    });
+
+    res.json(reservations);
+  } catch (error) {
+    console.error('Error fetching reservations:', error);
+    res.status(500).json({ error: 'Failed to fetch reservations' });
+  }
+});
+
+// Reserve a seat in a game
+app.post('/api/games/:gameId/reservations', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { seatId, playerName } = req.body;
+
+    if (!seatId || !playerName) {
+      return res.status(400).json({ error: 'Seat ID and player name are required' });
+    }
+
+    // Check if seat is already reserved
+    const existing = await db.query(
+      'SELECT * FROM reservations WHERE game_id = $1 AND seat_id = $2',
+      [gameId, parseInt(seatId)]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Seat already reserved' });
+    }
+
+    // Create reservation
+    await db.query(
+      'INSERT INTO reservations (game_id, seat_id, player_name) VALUES ($1, $2, $3)',
+      [gameId, parseInt(seatId), playerName]
+    );
+
+    // Fetch all reservations for this game
+    const result = await db.query(
+      'SELECT seat_id, player_name FROM reservations WHERE game_id = $1',
+      [gameId]
+    );
+
+    const reservations = {};
+    result.rows.forEach(row => {
+      reservations[row.seat_id] = row.player_name;
+    });
+
+    res.json({
+      message: 'Seat reserved successfully',
+      reservations
+    });
+  } catch (error) {
+    console.error('Error reserving seat:', error);
+    res.status(500).json({ error: 'Failed to reserve seat' });
+  }
+});
+
+// Delete a reservation from a specific game
+app.delete('/api/games/:gameId/reservations/:seatId', async (req, res) => {
+  try {
+    const { gameId, seatId } = req.params;
+    const { userEmail } = req.body;
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can remove players' });
+    }
+
+    // Delete the reservation
+    const deleteResult = await db.query(
+      'DELETE FROM reservations WHERE game_id = $1 AND seat_id = $2 RETURNING *',
+      [gameId, parseInt(seatId)]
+    );
+
+    if (deleteResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Fetch all remaining reservations for this game
+    const result = await db.query(
+      'SELECT seat_id, player_name FROM reservations WHERE game_id = $1',
+      [gameId]
+    );
+
+    const reservations = {};
+    result.rows.forEach(row => {
+      reservations[row.seat_id] = row.player_name;
+    });
+
+    res.json({
+      success: true,
+      message: 'Reservation removed',
+      reservations
+    });
+  } catch (error) {
+    console.error('Error removing reservation:', error);
+    res.status(500).json({ error: 'Failed to remove reservation' });
+  }
+});
+
+// ========== GROUPS ENDPOINTS ==========
+
+// Get all groups for a user
+app.get('/api/groups', async (req, res) => {
+  try {
+    const { userEmail } = req.query;
+    
+    let query = 'SELECT * FROM groups';
+    let params = [];
+    
+    if (userEmail) {
+      query += ' WHERE created_by = $1';
+      params = [userEmail];
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const result = await db.query(query, params);
+    
+    // Fetch players for each group
+    const groups = await Promise.all(result.rows.map(async (group) => {
+      const playersResult = await db.query(
+        'SELECT id, name, phone_number FROM group_players WHERE group_id = $1 ORDER BY created_at',
+        [group.id]
+      );
+      
+      return {
+        id: group.id,
+        name: group.name,
+        createdBy: group.created_by,
+        createdAt: group.created_at,
+        players: playersResult.rows.map(p => ({
+          id: p.id,
+          name: p.name,
+          phoneNumber: p.phone_number
+        }))
+      };
+    }));
+    
+    res.json(groups);
+  } catch (error) {
+    console.error('Error fetching groups:', error);
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
+// Create a new group
+app.post('/api/groups', async (req, res) => {
+  try {
+    const { name, createdBy } = req.body;
+
+    if (!name || !createdBy) {
+      return res.status(400).json({ error: 'Name and createdBy are required' });
+    }
+
+    const groupId = generateGroupId();
+
+    await db.query(
+      'INSERT INTO groups (id, name, created_by) VALUES ($1, $2, $3)',
+      [groupId, name, createdBy]
+    );
+
+    res.status(201).json({
+      message: 'Group created successfully',
+      group: {
+        id: groupId,
+        name,
+        createdBy,
+        players: []
+      }
+    });
+  } catch (error) {
+    console.error('Error creating group:', error);
+    res.status(500).json({ error: 'Failed to create group' });
+  }
+});
+
+// Delete a group
+app.delete('/api/groups/:groupId', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const result = await db.query(
+      'DELETE FROM groups WHERE id = $1 RETURNING *',
+      [groupId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    res.json({ message: 'Group deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting group:', error);
+    res.status(500).json({ error: 'Failed to delete group' });
+  }
+});
+
+// Add a player to a group
+app.post('/api/groups/:groupId/players', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { name, phoneNumber } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Player name is required' });
+    }
+
+    // Insert player
+    const playerResult = await db.query(
+      'INSERT INTO group_players (group_id, name, phone_number) VALUES ($1, $2, $3) RETURNING id',
+      [groupId, name, phoneNumber || null]
+    );
+
+    // Fetch updated group with all players
+    const groupResult = await db.query(
+      'SELECT * FROM groups WHERE id = $1',
+      [groupId]
+    );
+
+    if (groupResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const playersResult = await db.query(
+      'SELECT id, name, phone_number FROM group_players WHERE group_id = $1 ORDER BY created_at',
+      [groupId]
+    );
+
+    const group = {
+      id: groupResult.rows[0].id,
+      name: groupResult.rows[0].name,
+      createdBy: groupResult.rows[0].created_by,
+      createdAt: groupResult.rows[0].created_at,
+      players: playersResult.rows.map(p => ({
+        id: p.id,
+        name: p.name,
+        phoneNumber: p.phone_number
+      }))
+    };
+
+    res.status(201).json({
+      message: 'Player added successfully',
+      group
+    });
+  } catch (error) {
+    console.error('Error adding player:', error);
+    res.status(500).json({ error: 'Failed to add player' });
+  }
+});
+
+// Remove a player from a group
+app.delete('/api/groups/:groupId/players/:playerId', async (req, res) => {
+  try {
+    const { groupId, playerId } = req.params;
+
+    const result = await db.query(
+      'DELETE FROM group_players WHERE id = $1 AND group_id = $2 RETURNING *',
+      [parseInt(playerId), groupId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    // Fetch updated group
+    const groupResult = await db.query(
+      'SELECT * FROM groups WHERE id = $1',
+      [groupId]
+    );
+
+    const playersResult = await db.query(
+      'SELECT id, name, phone_number FROM group_players WHERE group_id = $1 ORDER BY created_at',
+      [groupId]
+    );
+
+    const group = {
+      id: groupResult.rows[0].id,
+      name: groupResult.rows[0].name,
+      createdBy: groupResult.rows[0].created_by,
+      createdAt: groupResult.rows[0].created_at,
+      players: playersResult.rows.map(p => ({
+        id: p.id,
+        name: p.name,
+        phoneNumber: p.phone_number
+      }))
+    };
+
+    res.json({
+      message: 'Player removed successfully',
+      group
+    });
+  } catch (error) {
+    console.error('Error removing player:', error);
+    res.status(500).json({ error: 'Failed to remove player' });
+  }
+});
+
+// ========== AUTOMATIC GAME CLEANUP ==========
+
+// Function to clean up expired games
+async function cleanupExpiredGames() {
+  try {
+    // Get current date/time in the format we store in DB
+    const now = new Date();
+    const currentDateTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    
+    // Find all games with a date/time that has passed
+    const expiredGamesResult = await db.query(
+      `SELECT id, name, game_date_time 
+       FROM games 
+       WHERE game_date_time IS NOT NULL 
+       AND game_date_time < $1`,
+      [currentDateTime]
+    );
+    
+    if (expiredGamesResult.rows.length === 0) {
+      console.log('🧹 Cleanup check: No expired games to delete');
+      return;
+    }
+    
+    console.log(`🧹 Found ${expiredGamesResult.rows.length} expired game(s) to delete`);
+    
+    // Delete each expired game and its reservations
+    for (const game of expiredGamesResult.rows) {
+      // Delete reservations first
+      await db.query(
+        'DELETE FROM reservations WHERE game_id = $1',
+        [game.id]
+      );
+      
+      // Delete the game
+      await db.query(
+        'DELETE FROM games WHERE id = $1',
+        [game.id]
+      );
+      
+      console.log(`   ✓ Deleted expired game: "${game.name}" (${game.id}) - was scheduled for ${game.game_date_time}`);
+    }
+    
+    console.log(`🧹 Cleanup complete: Deleted ${expiredGamesResult.rows.length} expired game(s)`);
+  } catch (error) {
+    console.error('❌ Error during game cleanup:', error);
+  }
+}
+
+// Schedule cleanup to run once a day at 11pm EST
+function startGameCleanupScheduler() {
+  // Run cleanup immediately on startup
+  cleanupExpiredGames();
+  
+  // Schedule to run daily at 11pm (23:00) - cron format: minute hour day month dayOfWeek
+  cron.schedule('0 23 * * *', () => {
+    console.log('🕐 Running scheduled game cleanup (daily at 11pm)...');
+    cleanupExpiredGames();
+  });
+  
+  console.log('✅ Game cleanup scheduler started (runs daily at 11pm EST)');
+}
+
+// ========== START SERVER ==========
+
+// Test database connection on startup
+async function testDatabaseConnection() {
+  try {
+    const result = await db.query('SELECT NOW()');
+    console.log('✅ Database connection successful');
+    console.log('   Database time:', result.rows[0].now);
+  } catch (error) {
+    console.error('❌ Database connection failed:', error.message);
+    console.error('   Please check your DATABASE_URL in .env file');
+  }
+}
+
+app.listen(PORT, async () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Reservations API available at http://localhost:${PORT}/api/reservations`);
+  console.log(`Games API available at http://localhost:${PORT}/api/games`);
+  console.log(`Groups API available at http://localhost:${PORT}/api/groups`);
+  console.log(`User API available at http://localhost:${PORT}/api/users`);
+  
+  // Test database connection
+  await testDatabaseConnection();
+  
+  // Start cleanup scheduler
+  startGameCleanupScheduler();
+});
