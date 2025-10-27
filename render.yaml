@@ -11,6 +11,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: SUPABASE_REGION
+        value: us-east-1
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
