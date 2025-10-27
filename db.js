@@ -21,21 +21,15 @@ if (connectionString && connectionString.includes('supabase') && isProduction) {
   // Replace db.xxx.supabase.co with aws-0-[region].pooler.supabase.com (IPv4)
   // This avoids IPv6 connection issues on platforms like Render
   if (config.host && config.host.includes('db.') && config.host.includes('.supabase.co')) {
-    // Extract project reference from the hostname (e.g., db.abcdefghijklm.supabase.co -> abcdefghijklm)
-    const projectRef = config.host.split('.')[1];
-    
     // Use SUPABASE_REGION env var if set, otherwise default to us-east-1
     const region = process.env.SUPABASE_REGION || 'us-east-1';
     config.host = `aws-0-${region}.pooler.supabase.com`;
     config.port = '6543';
     
-    // For pooler, username should be postgres.project_ref
-    if (config.user === 'postgres') {
-      config.user = `postgres.${projectRef}`;
-      console.log(`🔄 Updated username for pooler: ${config.user}`);
-    }
-    
-    console.log(`🔄 Converting to pooler: ${config.host}:${config.port}`);
+    // For Session mode (port 6543), keep username as 'postgres' (don't add project ref)
+    // Transaction mode would need postgres.project_ref format, but we're using Session mode
+    console.log(`🔄 Converting to pooler: ${config.host}:${config.port} (Session mode)`);
+    console.log(`🔄 Username: ${config.user}`);
     
     // Reconstruct the connection string
     connectionString = `postgresql://${config.user}:${config.password}@${config.host}:${config.port}/${config.database}`;
