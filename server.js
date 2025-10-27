@@ -2,15 +2,21 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const cron = require('node-cron');
+const path = require('path');
 const db = require('./db');
 require('dotenv').config();
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from the React app in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'build')));
+}
 
 // Helper function to hash passwords
 function hashPassword(password) {
@@ -635,6 +641,13 @@ function startGameCleanupScheduler() {
 }
 
 // ========== START SERVER ==========
+
+// Serve React app for all other routes (must be after API routes)
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+  });
+}
 
 // Test database connection on startup
 async function testDatabaseConnection() {
