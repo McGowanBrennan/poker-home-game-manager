@@ -90,8 +90,15 @@ You'll need to set the following environment variables in Render:
 
 2. **Get Your Connection String**
    - Go to Project Settings → Database
-   - Copy the "Connection String" (PostgreSQL format)
+   - **IMPORTANT**: Use the **Session Pooler** connection string (port 6543), NOT the direct connection (port 5432)
+   - Click "Connection Pooling" → Copy the connection string in "Session" mode
    - Replace `[YOUR-PASSWORD]` with your actual database password
+   - Example: `postgresql://postgres:[PASSWORD]@db.abc123.supabase.co:6543/postgres`
+   
+   **Why Session Pooler?**
+   - Render doesn't support IPv6 connections well
+   - The connection pooler (port 6543) uses IPv4 and is more reliable
+   - The code automatically adds `?pgbouncer=true` parameter
 
 3. **Run Database Migrations**
    - The application will automatically create tables on first run
@@ -162,10 +169,17 @@ You'll need to set the following environment variables in Render:
 
 ### Database Connection Issues
 
+**Issue**: `ENETUNREACH` or IPv6 connection errors
+- **Solution**: Use Supabase's Session Pooler (port 6543) instead of direct connection (port 5432)
+- Update your `DATABASE_URL` in Render to use port 6543
+- The app automatically handles the conversion if you're using Supabase
+- Go to Supabase → Settings → Database → Connection Pooling → Copy "Session" mode connection string
+
 **Issue**: Can't connect to Supabase
 - Verify connection string format
 - Check that password is URL-encoded if it contains special characters
 - Ensure database is active and not paused
+- Make sure you're using port 6543 (pooler) not 5432 (direct)
 
 ## Monitoring
 
