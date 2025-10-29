@@ -9,9 +9,12 @@ function PokerTable() {
   const [reservedSeats, setReservedSeats] = useState({});
   const [gameName, setGameName] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userCode, setUserCode] = useState('');
   const [gameCreator, setGameCreator] = useState('');
   const [gameDateTime, setGameDateTime] = useState(null);
   const [gameNote, setGameNote] = useState(null);
+  const [gameConfig, setGameConfig] = useState(null);
+  const [currentTable, setCurrentTable] = useState(1);
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -33,7 +36,11 @@ function PokerTable() {
       if (gameResponse.status === 404) {
         // Game doesn't exist (was deleted)
         alert('This game no longer exists. It may have been deleted.');
-        navigate('/dashboard', { state: { userEmail } });
+        if (userEmail) {
+          navigate('/dashboard', { state: { userEmail, userCode } });
+        } else {
+          navigate('/');
+        }
         return;
       }
       
@@ -43,10 +50,11 @@ function PokerTable() {
         setGameCreator(gameData.createdBy);
         setGameDateTime(gameData.gameDateTime);
         setGameNote(gameData.note);
+        setGameConfig(gameData.config);
       }
 
-      // Fetch reservations for this game
-      const reservationsResponse = await fetch(`/api/games/${gameId}/reservations`);
+      // Fetch reservations for this game and current table
+      const reservationsResponse = await fetch(`/api/games/${gameId}/reservations?tableNumber=${currentTable}`);
       if (reservationsResponse.ok) {
         const reservationsData = await reservationsResponse.json();
         setReservedSeats(reservationsData);
@@ -61,6 +69,9 @@ function PokerTable() {
     if (location.state?.userEmail) {
       setUserEmail(location.state.userEmail);
     }
+    if (location.state?.userCode) {
+      setUserCode(location.state.userCode);
+    }
 
     fetchGameData();
     
@@ -69,7 +80,7 @@ function PokerTable() {
     
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameId]);
+  }, [gameId, currentTable]);
 
   const handleReserveSeat = async (seatId) => {
     // Check if seat is already reserved
@@ -108,7 +119,8 @@ function PokerTable() {
         },
         body: JSON.stringify({
           seatId: seatId.toString(),
-          playerName: trimmedName
+          playerName: trimmedName,
+          tableNumber: currentTable
         })
       });
 
@@ -126,7 +138,12 @@ function PokerTable() {
   };
 
   const handleBackToDashboard = () => {
-    navigate('/dashboard', { state: { userEmail } });
+    // If user is signed in, go to dashboard; otherwise go to landing page
+    if (userEmail) {
+      navigate('/dashboard', { state: { userEmail, userCode } });
+    } else {
+      navigate('/');
+    }
   };
 
   // Format game date/time for display
@@ -207,7 +224,7 @@ function PokerTable() {
     }
 
     try {
-      const response = await fetch(`/api/games/${gameId}/reservations/${seatId}`, {
+      const response = await fetch(`/api/games/${gameId}/reservations/${seatId}?tableNumber=${currentTable}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -233,17 +250,64 @@ function PokerTable() {
   // Check if current user is the game creator
   const isCreator = userEmail && gameCreator && userEmail === gameCreator;
 
+  const handleRandomizeSeating = async () => {
+    if (!window.confirm('Are you sure you want to randomize the seating chart? This will shuffle all players and redistribute them evenly across tables.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/games/${gameId}/randomize-seating`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          numberOfTables: gameConfig?.numberOfTables || 1
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Seating randomized! ${data.totalPlayers} players distributed across ${gameConfig?.numberOfTables || 1} table(s).`);
+        // Refresh game data to show new seating
+        fetchGameData();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to randomize seating');
+      }
+    } catch (error) {
+      console.error('Error randomizing seating:', error);
+      alert('Failed to randomize seating. Please try again.');
+    }
+  };
+
   return (
     <div className="App">
       <div className="poker-room">
-        <div className="game-header">
-          <button onClick={handleBackToDashboard} className="back-to-dashboard-btn">
-            ← Back to Dashboard
-          </button>
-          <h2 className="game-title">{gameName || 'Poker Game'}</h2>
-          <button onClick={handleCopyGameLink} className="game-code-btn" title="Click to copy invite link">
-            Game Code: {gameId}
-          </button>
+        <div className="game-header-minimal">
+          <div className="header-row">
+            <button onClick={handleBackToDashboard} className="minimal-btn back-btn" title={userEmail ? 'Back to Dashboard' : 'Return to Home'}>
+              ← Back
+            </button>
+            <div className="header-center">
+              <h2 className="game-title-minimal">{gameName || 'Poker Game'}</h2>
+              <button onClick={handleCopyGameLink} className="game-code-minimal" title="Click to copy invite link">
+                {gameId}
+              </button>
+            </div>
+            {isCreator ? (
+              <button 
+                onClick={handleRandomizeSeating} 
+                className="minimal-btn randomize-btn" 
+                title="Shuffle players and balance tables"
+              >
+                🔀 Shuffle
+              </button>
+            ) : (
+              <div className="header-spacer"></div>
+            )}
+          </div>
         </div>
 
         <div className="poker-table-container">
@@ -298,6 +362,31 @@ function PokerTable() {
             )}
           </div>
         </div>
+
+        {/* Multi-table navigation */}
+        {gameConfig && gameConfig.numberOfTables && gameConfig.numberOfTables > 1 && (
+          <div className="table-navigation">
+            <button 
+              className="table-nav-btn"
+              onClick={() => setCurrentTable(prev => Math.max(1, prev - 1))}
+              disabled={currentTable === 1}
+              title="Previous Table"
+            >
+              ←
+            </button>
+            <span className="table-indicator">
+              Table {currentTable} of {gameConfig.numberOfTables}
+            </span>
+            <button 
+              className="table-nav-btn"
+              onClick={() => setCurrentTable(prev => Math.min(gameConfig.numberOfTables, prev + 1))}
+              disabled={currentTable === gameConfig.numberOfTables}
+              title="Next Table"
+            >
+              →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

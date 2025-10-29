@@ -24,11 +24,35 @@ function GameManagement() {
   const [newPlayerPhone, setNewPlayerPhone] = useState('');
   const [contactsSupported, setContactsSupported] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  
+  // Tournament player list state
+  const [showGameConfig, setShowGameConfig] = useState(false);
+  const [showPlayerListQuestion, setShowPlayerListQuestion] = useState(false);
+  const [showPlayerSelection, setShowPlayerSelection] = useState(false);
+  const [tournamentPlayers, setTournamentPlayers] = useState([]);
+  const [userCode, setUserCode] = useState('');
+  const [gameConfig, setGameConfig] = useState({
+    gameType: '',
+    maxPlayers: 10,
+    numberOfTables: 1,
+    playersPerTable: 10,
+    pokerType: 'NLH',
+    smallBlind: '',
+    bigBlind: '',
+    buyInAmount: '',
+    tournamentType: 'Standard',
+    enableRebuys: true,
+    autoDeleteAfterDays: 7,
+    playerList: []
+  });
 
   useEffect(() => {
-    // Get user email from navigation state
+    // Get user email and user code from navigation state
     if (location.state?.userEmail) {
       setUserEmail(location.state.userEmail);
+    }
+    if (location.state?.userCode) {
+      setUserCode(location.state.userCode);
     }
 
     // Check if Contact Picker API is supported
@@ -64,6 +88,149 @@ function GameManagement() {
     }
   };
 
+  // Tournament flow handlers
+  const handleTournamentClick = () => {
+    setShowGameConfig(false);
+    setShowPlayerListQuestion(true);
+  };
+
+  const handlePlayerListReady = () => {
+    setShowPlayerListQuestion(false);
+    setShowPlayerSelection(true);
+  };
+
+  const handlePlayerListNotReady = () => {
+    setShowPlayerListQuestion(false);
+    setShowGameConfig(true);
+    setGameConfig({ ...gameConfig, gameType: 'tournament', playerList: [] });
+  };
+
+  const handleAddTournamentPlayer = () => {
+    const playerName = document.querySelector('.tournament-player-input')?.value;
+    if (!playerName?.trim()) {
+      alert('Please enter a player name');
+      return;
+    }
+    
+    if (tournamentPlayers.some(p => p.toLowerCase() === playerName.trim().toLowerCase())) {
+      alert('This player is already in the list');
+      return;
+    }
+
+    setTournamentPlayers([...tournamentPlayers, playerName.trim()]);
+    document.querySelector('.tournament-player-input').value = '';
+  };
+
+  const handleRemoveTournamentPlayer = (playerName) => {
+    setTournamentPlayers(tournamentPlayers.filter(p => p !== playerName));
+  };
+
+  const handlePlayerSelectionComplete = () => {
+    if (tournamentPlayers.length === 0) {
+      alert('Please add at least one player');
+      return;
+    }
+    
+    const playersPerTable = gameConfig.playersPerTable || 10;
+    const calculatedTables = Math.ceil(tournamentPlayers.length / playersPerTable);
+    
+    setShowPlayerSelection(false);
+    setShowGameConfig(true);
+    setGameConfig({ 
+      ...gameConfig, 
+      gameType: 'tournament', 
+      playerList: tournamentPlayers,
+      numberOfTables: calculatedTables
+    });
+  };
+
+  const handleBackFromPlayerSelection = () => {
+    setShowPlayerSelection(false);
+    setShowPlayerListQuestion(true);
+  };
+
+  const handleBackFromPlayerListQuestion = () => {
+    setShowPlayerListQuestion(false);
+    setShowGameConfig(true);
+    setGameConfig({ ...gameConfig, gameType: '' });
+  };
+
+  const handleExitTournamentFlow = () => {
+    setShowPlayerListQuestion(false);
+    setShowPlayerSelection(false);
+    setShowGameConfig(false);
+    setTournamentPlayers([]);
+    setGameConfig({
+      gameType: '',
+      maxPlayers: 10,
+      numberOfTables: 1,
+      playersPerTable: 10,
+      pokerType: 'NLH',
+      smallBlind: '',
+      bigBlind: '',
+      buyInAmount: '',
+      tournamentType: 'Standard',
+      enableRebuys: true,
+      autoDeleteAfterDays: 7,
+      playerList: []
+    });
+  };
+
+  const seatPlayersAutomatically = async (gameId, playerList, playersPerTable, numberOfTables) => {
+    try {
+      const playerDistribution = [];
+      let currentTable = 1;
+      let currentSeat = 1;
+
+      for (let i = 0; i < playerList.length; i++) {
+        playerDistribution.push({
+          playerName: playerList[i],
+          tableNumber: currentTable,
+          seatId: currentSeat
+        });
+
+        currentSeat++;
+        
+        if (currentSeat > playersPerTable) {
+          currentTable++;
+          currentSeat = 1;
+          
+          if (currentTable > numberOfTables) {
+            currentTable = 1;
+          }
+        }
+      }
+
+      const reservationPromises = playerDistribution.map(({ playerName, tableNumber, seatId }) =>
+        fetch(`/api/games/${gameId}/reservations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            seatId,
+            playerName,
+            tableNumber
+          })
+        })
+      );
+
+      await Promise.all(reservationPromises);
+      console.log(`Successfully seated ${playerList.length} players across ${numberOfTables} table(s)`);
+    } catch (error) {
+      console.error('Error seating players:', error);
+      alert('Players were not automatically seated. You can add them manually.');
+    }
+  };
+
+  const handleOpenGameConfig = () => {
+    if (!gameName.trim()) {
+      alert('Please enter a game name');
+      return;
+    }
+    setShowGameConfig(true);
+  };
+
   const handleCreateGame = async () => {
     if (!gameName.trim()) {
       alert('Please enter a game name');
@@ -91,20 +258,44 @@ function GameManagement() {
           name: gameName,
           createdBy: userEmail,
           gameDateTime,
-          note: gameNote.trim() || null
+          note: gameNote.trim() || null,
+          config: gameConfig
         })
       });
 
       if (response.ok) {
         const data = await response.json();
+        const gameId = data.game.id;
+
+        // If we have a player list, automatically seat players
+        if (gameConfig.playerList && gameConfig.playerList.length > 0) {
+          await seatPlayersAutomatically(gameId, gameConfig.playerList, gameConfig.playersPerTable, gameConfig.numberOfTables);
+        }
+
         setShowCreateGame(false);
+        setShowGameConfig(false);
         setGameName('');
         setGameDate('');
         setGameTime('');
         setGameNote('');
+        setTournamentPlayers([]);
+        setGameConfig({
+          gameType: '',
+          maxPlayers: 10,
+          numberOfTables: 1,
+          playersPerTable: 10,
+          pokerType: 'NLH',
+          smallBlind: '',
+          bigBlind: '',
+          buyInAmount: '',
+          tournamentType: 'Standard',
+          enableRebuys: true,
+          autoDeleteAfterDays: 7,
+          playerList: []
+        });
         fetchGames();
         // Navigate to the game table with the game ID
-        navigate(`/table/${data.game.id}`, { state: { userEmail } });
+        navigate(`/table/${gameId}`, { state: { userEmail, userCode } });
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to create game');
@@ -451,8 +642,8 @@ function GameManagement() {
                   />
                 </div>
                 <div className="form-actions">
-                  <button onClick={handleCreateGame} className="primary-btn">
-                    Create
+                  <button onClick={handleOpenGameConfig} className="primary-btn">
+                    Next: Configure Game
                   </button>
                   <button 
                     onClick={() => {
@@ -717,6 +908,402 @@ function GameManagement() {
             </div>
           </div>
         </div>
+
+        {/* Game Configuration Modal */}
+        {showGameConfig && (
+          <div className="modal-overlay" onClick={handleExitTournamentFlow}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <h3>Configure Game Settings</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Choose your game type and customize settings
+              </p>
+
+              <div className="config-form">
+                {/* Game Type Selection */}
+                {!gameConfig.gameType && (
+                  <div className="game-type-selection">
+                    <button
+                      onClick={() => setGameConfig({ ...gameConfig, gameType: 'cash' })}
+                      className="game-type-btn"
+                    >
+                      <span className="game-type-icon">💵</span>
+                      <span className="game-type-title">Cash Game</span>
+                      <span className="game-type-desc">Play with chips that have real value</span>
+                    </button>
+                    <button
+                      onClick={handleTournamentClick}
+                      className="game-type-btn"
+                    >
+                      <span className="game-type-icon">🏆</span>
+                      <span className="game-type-title">Tournament</span>
+                      <span className="game-type-desc">Play for prizes with fixed buy-in</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Cash Game Configuration */}
+                {gameConfig.gameType === 'cash' && (
+                  <>
+                    <div className="config-section-header">
+                      <h4>Cash Game Settings</h4>
+                      <button 
+                        onClick={() => setGameConfig({ ...gameConfig, gameType: '' })}
+                        className="change-type-btn"
+                      >
+                        Change Game Type
+                      </button>
+                    </div>
+
+                    <div className="config-item">
+                      <label>Maximum Players</label>
+                      <input
+                        type="number"
+                        min="2"
+                        max="20"
+                        value={gameConfig.maxPlayers}
+                        onChange={(e) => {
+                          const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                          setGameConfig({ ...gameConfig, maxPlayers: value });
+                        }}
+                        onBlur={(e) => {
+                          if (e.target.value === '' || parseInt(e.target.value) < 2) {
+                            setGameConfig({ ...gameConfig, maxPlayers: 10 });
+                          }
+                        }}
+                        className="game-input"
+                      />
+                    </div>
+
+                    <div className="config-item">
+                      <label>Number of Tables</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={gameConfig.numberOfTables}
+                        onChange={(e) => {
+                          const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                          setGameConfig({ ...gameConfig, numberOfTables: value });
+                        }}
+                        onBlur={(e) => {
+                          if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                            setGameConfig({ ...gameConfig, numberOfTables: 1 });
+                          }
+                        }}
+                        className="game-input"
+                      />
+                    </div>
+
+                    <div className="config-item">
+                      <label>Game Type</label>
+                      <select
+                        value={gameConfig.pokerType}
+                        onChange={(e) => setGameConfig({ ...gameConfig, pokerType: e.target.value })}
+                        className="game-input"
+                      >
+                        <option value="NLH">No-Limit Hold'em (NLH)</option>
+                        <option value="PLO">Pot-Limit Omaha (PLO)</option>
+                        <option value="Mixed">Mixed Games</option>
+                      </select>
+                    </div>
+
+                    <div className="config-item">
+                      <label>Stakes</label>
+                      <div className="stakes-input-group">
+                        <div className="stake-input-wrapper">
+                          <span className="stake-label">Small Blind</span>
+                          <input
+                            type="text"
+                            placeholder="$0.50"
+                            value={gameConfig.smallBlind}
+                            onChange={(e) => setGameConfig({ ...gameConfig, smallBlind: e.target.value })}
+                            className="game-input stake-input"
+                          />
+                        </div>
+                        <span className="stake-divider">/</span>
+                        <div className="stake-input-wrapper">
+                          <span className="stake-label">Big Blind</span>
+                          <input
+                            type="text"
+                            placeholder="$1.00"
+                            value={gameConfig.bigBlind}
+                            onChange={(e) => setGameConfig({ ...gameConfig, bigBlind: e.target.value })}
+                            className="game-input stake-input"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Tournament Configuration */}
+                {gameConfig.gameType === 'tournament' && (
+                  <>
+                    <div className="config-section-header">
+                      <h4>Tournament Settings</h4>
+                      <button 
+                        onClick={() => setGameConfig({ ...gameConfig, gameType: '' })}
+                        className="change-type-btn"
+                      >
+                        Change Game Type
+                      </button>
+                    </div>
+
+                    {/* Player list vs No player list configuration */}
+                    {gameConfig.playerList && gameConfig.playerList.length > 0 ? (
+                      <>
+                        <div className="config-item">
+                          <label>Total Players: {gameConfig.playerList.length}</label>
+                          <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '5px 0 0 0' }}>
+                            {gameConfig.playerList.join(', ')}
+                          </p>
+                        </div>
+
+                        <div className="config-item">
+                          <label>Players Per Table</label>
+                          <input
+                            type="number"
+                            min="2"
+                            max="20"
+                            value={gameConfig.playersPerTable}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              const playersPerTable = value || 10;
+                              const calculatedTables = Math.ceil(gameConfig.playerList.length / playersPerTable);
+                              setGameConfig({ ...gameConfig, playersPerTable: value, numberOfTables: calculatedTables });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 2) {
+                                const playersPerTable = 10;
+                                const calculatedTables = Math.ceil(gameConfig.playerList.length / playersPerTable);
+                                setGameConfig({ ...gameConfig, playersPerTable, numberOfTables: calculatedTables });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+
+                        <div className="config-item">
+                          <label>Number of Tables (Auto-calculated)</label>
+                          <input
+                            type="number"
+                            value={gameConfig.numberOfTables}
+                            disabled
+                            className="game-input"
+                            style={{ background: '#f3f4f6', cursor: 'not-allowed' }}
+                          />
+                          <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '5px 0 0 0' }}>
+                            Based on {gameConfig.playerList.length} players at {gameConfig.playersPerTable} per table
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="config-item">
+                          <label>Maximum Players</label>
+                          <input
+                            type="number"
+                            min="2"
+                            max="200"
+                            value={gameConfig.maxPlayers}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              setGameConfig({ ...gameConfig, maxPlayers: value });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 2) {
+                                setGameConfig({ ...gameConfig, maxPlayers: 10 });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+
+                        <div className="config-item">
+                          <label>Number of Tables</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={gameConfig.numberOfTables}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              setGameConfig({ ...gameConfig, numberOfTables: value });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                                setGameConfig({ ...gameConfig, numberOfTables: 1 });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <div className="config-item">
+                      <label>Buy-In Amount</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., $50"
+                        value={gameConfig.buyInAmount}
+                        onChange={(e) => setGameConfig({ ...gameConfig, buyInAmount: e.target.value })}
+                        className="game-input"
+                      />
+                    </div>
+
+                    <div className="config-item">
+                      <label>Tournament Type</label>
+                      <select
+                        value={gameConfig.tournamentType}
+                        onChange={(e) => setGameConfig({ ...gameConfig, tournamentType: e.target.value })}
+                        className="game-input"
+                      >
+                        <option value="Standard">Standard</option>
+                        <option value="PKO">Progressive Knockout (PKO)</option>
+                        <option value="Mystery Bounty">Mystery Bounty</option>
+                        <option value="Freezeout">Freezeout</option>
+                      </select>
+                    </div>
+
+                    {(gameConfig.tournamentType === 'Standard' || gameConfig.tournamentType === 'PKO') && (
+                      <div className="config-item">
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={gameConfig.enableRebuys}
+                            onChange={(e) => setGameConfig({ ...gameConfig, enableRebuys: e.target.checked })}
+                          />
+                          <span>Allow Re-buys</span>
+                        </label>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {gameConfig.gameType && (
+                <div className="button-group" style={{ marginTop: '20px' }}>
+                  <button onClick={handleCreateGame} className="primary-btn">
+                    Create Game
+                  </button>
+                  <button 
+                    onClick={handleExitTournamentFlow} 
+                    className="secondary-btn"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Player List Question Modal */}
+        {showPlayerListQuestion && (
+          <div className="modal-overlay">
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Tournament Player List</h3>
+              <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '0.95rem' }}>
+                Do you already have your player list ready?
+              </p>
+              
+              <div className="player-list-options">
+                <button onClick={handlePlayerListReady} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>✅</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>I have my player list</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Add players to the tournament</span>
+                </button>
+                <button onClick={handlePlayerListNotReady} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>📋</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>Player list not finalized</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Players can reserve seats later</span>
+                </button>
+              </div>
+
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
+                <button onClick={handleBackFromPlayerListQuestion} className="cancel-btn">
+                  ← Back
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Player Selection Modal */}
+        {showPlayerSelection && (
+          <div className="modal-overlay">
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
+              <h3>Add Tournament Players</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Enter the names of players who will participate in this tournament ({tournamentPlayers.length} added)
+              </p>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    type="text"
+                    placeholder="Enter player name"
+                    className="player-input tournament-player-input"
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        handleAddTournamentPlayer();
+                      }
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    onClick={handleAddTournamentPlayer}
+                    className="save-player-btn"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    Add Player
+                  </button>
+                </div>
+              </div>
+
+              {tournamentPlayers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px' }}>
+                  <p>No players added yet</p>
+                </div>
+              ) : (
+                <div className="tournament-players-list">
+                  {tournamentPlayers.map((playerName, index) => (
+                    <div key={index} className="tournament-player-item">
+                      <div className="tournament-player-info">
+                        <span className="player-number">{index + 1}.</span>
+                        <span className="player-name">{playerName}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleRemoveTournamentPlayer(playerName)}
+                        className="remove-player-btn"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+                <button 
+                  onClick={handleBackFromPlayerSelection} 
+                  className="cancel-btn"
+                >
+                  ← Back
+                </button>
+                <button 
+                  onClick={handlePlayerSelectionComplete} 
+                  className="confirm-btn"
+                  disabled={tournamentPlayers.length === 0}
+                  style={{ flex: 1 }}
+                >
+                  Continue ({tournamentPlayers.length} players)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

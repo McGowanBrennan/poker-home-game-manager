@@ -1,10 +1,30 @@
 .auth-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #0a5c2e 0%, #1a6f42 50%, #0a5c2e 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  position: relative;
+}
+
+.auth-logo-link {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.auth-logo-link:hover {
+  transform: scale(1.05);
+  opacity: 0.9;
+}
+
+.auth-page-logo {
+  height: 50px;
+  width: auto;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
 }
 
 .auth-container {
@@ -79,12 +99,12 @@
 
 .auth-submit-btn {
   padding: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: linear-gradient(135deg, #d4af37 0%, #c49a27 100%);
+  color: #1a1a1a;
   border: none;
   border-radius: 10px;
   font-size: 1.1rem;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
   transition: all 0.3s ease;
   margin-top: 10px;
@@ -92,7 +112,8 @@
 
 .auth-submit-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 6px 20px rgba(212, 175, 55, 0.5);
+  background: linear-gradient(135deg, #e0bd45 0%, #d4af37 100%);
 }
 
 .auth-submit-btn:disabled {
@@ -140,6 +161,15 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .auth-logo-link {
+    top: 15px;
+    left: 15px;
+  }
+
+  .auth-page-logo {
+    height: 40px;
+  }
+
   .auth-container {
     padding: 40px 30px;
   }

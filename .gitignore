@@ -160,4 +160,6 @@ yarn-error.log*
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-.env
+
+# Local data storage
+gameConfigurations.json

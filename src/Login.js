@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import './Auth.css';
 
 function Login() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Can be email or username
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -14,7 +14,7 @@ function Login() {
     setError('');
 
     // Validation
-    if (!email || !password) {
+    if (!identifier || !password) {
       setError('All fields are required');
       return;
     }
@@ -27,14 +27,14 @@ function Login() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
         // Login successful
-        navigate('/dashboard', { state: { userEmail: data.email } });
+        navigate('/dashboard', { state: { userEmail: data.identifier, userCode: data.userCode } });
       } else {
         setError(data.error || 'Login failed');
       }
@@ -48,6 +48,9 @@ function Login() {
 
   return (
     <div className="auth-page">
+      <Link to="/" className="auth-logo-link">
+        <img src="/logo.png" alt="Logo" className="auth-page-logo" />
+      </Link>
       <div className="auth-container">
         <h1 className="auth-title">Welcome Back</h1>
         <p className="auth-subtitle">Log in to PokerHomeGameManager.com</p>
@@ -56,13 +59,13 @@ function Login() {
           {error && <div className="error-message">{error}</div>}
 
           <div className="form-group">
-            <label htmlFor="email">Email Address</label>
+            <label htmlFor="identifier">Email or Username</label>
             <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
+              type="text"
+              id="identifier"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="Enter your email or username"
               disabled={loading}
             />
           </div>
