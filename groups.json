@@ -1,0 +1,23 @@
+[
+  {
+    "id": "1761572868793",
+    "name": "regulars",
+    "createdBy": "mcgowan.brennan@gmail.com",
+    "createdAt": "2025-10-27T13:47:48.793Z",
+    "players": [
+      {
+        "id": "1761572878532",
+        "name": "noah",
+        "phoneNumber": "",
+        "addedAt": "2025-10-27T13:47:58.532Z"
+      }
+    ]
+  },
+  {
+    "id": "1761572889352",
+    "name": "dwadwa",
+    "createdBy": "billsfanbrennan@gmail.com",
+    "createdAt": "2025-10-27T13:48:09.352Z",
+    "players": []
+  }
+]
