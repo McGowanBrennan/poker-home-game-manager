@@ -15,6 +15,11 @@ function PokerTable() {
   const [gameNote, setGameNote] = useState(null);
   const [gameConfig, setGameConfig] = useState(null);
   const [currentTable, setCurrentTable] = useState(1);
+  const [tournamentStatus, setTournamentStatus] = useState('Registering');
+  const [showEditDetails, setShowEditDetails] = useState(false);
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [editNote, setEditNote] = useState('');
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -51,6 +56,11 @@ function PokerTable() {
         setGameDateTime(gameData.gameDateTime);
         setGameNote(gameData.note);
         setGameConfig(gameData.config);
+        
+        // Set tournament status if available
+        if (gameData.config && gameData.config.tournamentStatus) {
+          setTournamentStatus(gameData.config.tournamentStatus);
+        }
       }
 
       // Fetch reservations for this game and current table
@@ -66,11 +76,23 @@ function PokerTable() {
 
   // Load game data on mount and poll for updates
   useEffect(() => {
-    if (location.state?.userEmail) {
-      setUserEmail(location.state.userEmail);
+    // Get user email and user code from navigation state or localStorage
+    const emailFromState = location.state?.userEmail;
+    const codeFromState = location.state?.userCode;
+    const emailFromStorage = localStorage.getItem('userEmail');
+    const codeFromStorage = localStorage.getItem('userCode');
+
+    // Prioritize navigation state, then fall back to localStorage
+    if (emailFromState) {
+      setUserEmail(emailFromState);
+    } else if (emailFromStorage) {
+      setUserEmail(emailFromStorage);
     }
-    if (location.state?.userCode) {
-      setUserCode(location.state.userCode);
+
+    if (codeFromState) {
+      setUserCode(codeFromState);
+    } else if (codeFromStorage) {
+      setUserCode(codeFromStorage);
     }
 
     fetchGameData();
@@ -282,6 +304,104 @@ function PokerTable() {
     }
   };
 
+  const handleUpdateTournamentStatus = async () => {
+    const statuses = ['Registering', 'In Progress', 'Break', 'Final Table', 'Finished'];
+    const currentIndex = statuses.indexOf(tournamentStatus);
+    const nextIndex = (currentIndex + 1) % statuses.length;
+    const newStatus = statuses[nextIndex];
+
+    try {
+      const response = await fetch(`/api/games/${gameId}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          status: newStatus
+        })
+      });
+
+      if (response.ok) {
+        setTournamentStatus(newStatus);
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to update tournament status');
+      }
+    } catch (error) {
+      console.error('Error updating tournament status:', error);
+      alert('Failed to update tournament status. Please try again.');
+    }
+  };
+
+  const handleOpenEditDetails = () => {
+    // Parse existing date/time if available
+    if (gameDateTime) {
+      const date = new Date(gameDateTime);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      
+      setEditDate(`${year}-${month}-${day}`);
+      setEditTime(`${hours}:${minutes}`);
+    } else {
+      setEditDate('');
+      setEditTime('');
+    }
+    
+    setEditNote(gameNote || '');
+    setShowEditDetails(true);
+  };
+
+  const handleSaveDetails = async () => {
+    try {
+      // Combine date and time
+      let gameDateTime = null;
+      if (editDate && editTime) {
+        gameDateTime = `${editDate}T${editTime}`;
+      }
+
+      console.log('Sending update request:', {
+        gameId,
+        userEmail,
+        gameDateTime,
+        note: editNote.trim() || null
+      });
+
+      const response = await fetch(`/api/games/${gameId}/details`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          gameDateTime: gameDateTime,
+          note: editNote.trim() || null
+        })
+      });
+
+      console.log('Response status:', response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Update successful:', data);
+        setGameDateTime(data.game.game_date_time);
+        setGameNote(data.game.note);
+        setShowEditDetails(false);
+        alert('Game details updated successfully!');
+      } else {
+        const error = await response.json();
+        console.error('Server error:', error);
+        alert(error.error || 'Failed to update game details');
+      }
+    } catch (error) {
+      console.error('Error updating game details:', error);
+      alert(`Failed to update game details: ${error.message}`);
+    }
+  };
+
   return (
     <div className="App">
       <div className="poker-room">
@@ -346,7 +466,21 @@ function PokerTable() {
               );
             })}
             
-            {(gameDateTime || gameNote) && (
+            {/* Tournament Status Button */}
+            {gameConfig && gameConfig.gameType === 'tournament' && (
+              <div className="tournament-status-container">
+                <button
+                  className={`tournament-status-btn ${isCreator ? 'clickable' : ''}`}
+                  onClick={isCreator ? handleUpdateTournamentStatus : undefined}
+                  disabled={!isCreator}
+                  title={isCreator ? 'Click to change status' : ''}
+                >
+                  {tournamentStatus}
+                </button>
+              </div>
+            )}
+
+            {(gameDateTime || gameNote || isCreator) && (
               <div className="table-center-info">
                 {gameDateTime && (
                   <p className="table-date-time">
@@ -357,6 +491,15 @@ function PokerTable() {
                   <p className="table-game-note">
                     {gameNote}
                   </p>
+                )}
+                {isCreator && (
+                  <button 
+                    className="edit-details-btn"
+                    onClick={handleOpenEditDetails}
+                    title="Edit game date, time, and note"
+                  >
+                    ✏️ Edit Details
+                  </button>
                 )}
               </div>
             )}
@@ -385,6 +528,110 @@ function PokerTable() {
             >
               →
             </button>
+          </div>
+        )}
+
+        {/* Edit Details Modal */}
+        {showEditDetails && (
+          <div className="modal-overlay" onClick={() => setShowEditDetails(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Edit Game Details</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Update the date, time, and note for this game.
+              </p>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+                  Game Date
+                </label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '1rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+                  Game Time
+                </label>
+                <input
+                  type="time"
+                  value={editTime}
+                  onChange={(e) => setEditTime(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '1rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+                  Game Note (Optional)
+                </label>
+                <textarea
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  placeholder="Add a note about this game..."
+                  rows="3"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '1rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    resize: 'vertical',
+                    fontFamily: 'Roboto, sans-serif'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  onClick={() => setShowEditDetails(false)}
+                  style={{
+                    flex: '1',
+                    padding: '12px',
+                    fontSize: '1rem',
+                    background: '#6b7280',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveDetails}
+                  style={{
+                    flex: '1',
+                    padding: '12px',
+                    fontSize: '1rem',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

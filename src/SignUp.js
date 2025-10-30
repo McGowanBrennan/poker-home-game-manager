@@ -83,7 +83,9 @@ function SignUp() {
       const data = await response.json();
 
       if (response.ok) {
-        // Registration successful
+        // Registration successful - store in localStorage for persistence
+        localStorage.setItem('userEmail', data.user.identifier);
+        localStorage.setItem('userCode', data.user.userCode);
         navigate('/dashboard', { state: { userEmail: data.user.identifier, userCode: data.user.userCode } });
       } else {
         setError(data.error || 'Registration failed');

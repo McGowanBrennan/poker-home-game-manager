@@ -33,7 +33,9 @@ function Login() {
       const data = await response.json();
 
       if (response.ok) {
-        // Login successful
+        // Login successful - store in localStorage for persistence
+        localStorage.setItem('userEmail', data.identifier);
+        localStorage.setItem('userCode', data.userCode);
         navigate('/dashboard', { state: { userEmail: data.identifier, userCode: data.userCode } });
       } else {
         setError(data.error || 'Login failed');

@@ -30,7 +30,28 @@ function GameManagement() {
   const [showPlayerListQuestion, setShowPlayerListQuestion] = useState(false);
   const [showPlayerSelection, setShowPlayerSelection] = useState(false);
   const [tournamentPlayers, setTournamentPlayers] = useState([]);
+  const [tournamentPlayerInput, setTournamentPlayerInput] = useState('');
   const [userCode, setUserCode] = useState('');
+  
+  // Blind structure state
+  const [showBlindStructureQuestion, setShowBlindStructureQuestion] = useState(false);
+  const [showBlindStructureBuilder, setShowBlindStructureBuilder] = useState(false);
+  const [showCustomBlindBuilder, setShowCustomBlindBuilder] = useState(false);
+  const [chipSet, setChipSet] = useState('standard'); // 'standard', 'custom'
+  const [blindDuration, setBlindDuration] = useState(15); // minutes
+  const [customBlindLevels, setCustomBlindLevels] = useState([]);
+  const [newLevelSmallBlind, setNewLevelSmallBlind] = useState('');
+  const [newLevelBigBlind, setNewLevelBigBlind] = useState('');
+  const [newLevelDuration, setNewLevelDuration] = useState('15');
+  const [isBreakLevel, setIsBreakLevel] = useState(false);
+  const [useSameDuration, setUseSameDuration] = useState(false);
+  const [savedDuration, setSavedDuration] = useState('15');
+  const [enableBBAntes, setEnableBBAntes] = useState(false);
+  const [showSaveStructure, setShowSaveStructure] = useState(false);
+  const [structureName, setStructureName] = useState('');
+  const [showLoadStructure, setShowLoadStructure] = useState(false);
+  const [savedStructures, setSavedStructures] = useState([]);
+  
   const [gameConfig, setGameConfig] = useState({
     gameType: '',
     maxPlayers: 10,
@@ -43,16 +64,35 @@ function GameManagement() {
     tournamentType: 'Standard',
     enableRebuys: true,
     autoDeleteAfterDays: 7,
-    playerList: []
+    playerList: [],
+    blindStructure: null, // Will store the blind structure configuration
+    tournamentStatus: 'Registering' // Default status for tournaments
   });
 
   useEffect(() => {
-    // Get user email and user code from navigation state
-    if (location.state?.userEmail) {
-      setUserEmail(location.state.userEmail);
+    // Get user email and user code from navigation state or localStorage
+    const emailFromState = location.state?.userEmail;
+    const codeFromState = location.state?.userCode;
+    const emailFromStorage = localStorage.getItem('userEmail');
+    const codeFromStorage = localStorage.getItem('userCode');
+
+    // Prioritize navigation state, then fall back to localStorage
+    if (emailFromState) {
+      setUserEmail(emailFromState);
+      localStorage.setItem('userEmail', emailFromState);
+    } else if (emailFromStorage) {
+      setUserEmail(emailFromStorage);
+    } else {
+      // If no user email found, redirect to login
+      navigate('/');
+      return;
     }
-    if (location.state?.userCode) {
-      setUserCode(location.state.userCode);
+
+    if (codeFromState) {
+      setUserCode(codeFromState);
+      localStorage.setItem('userCode', codeFromState);
+    } else if (codeFromStorage) {
+      setUserCode(codeFromStorage);
     }
 
     // Check if Contact Picker API is supported
@@ -63,7 +103,7 @@ function GameManagement() {
     // Detect iOS device
     const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     setIsIOS(iOS);
-  }, [location]);
+  }, [location, navigate]);
 
   // Fetch games and groups when userEmail is set
   useEffect(() => {
@@ -106,19 +146,18 @@ function GameManagement() {
   };
 
   const handleAddTournamentPlayer = () => {
-    const playerName = document.querySelector('.tournament-player-input')?.value;
-    if (!playerName?.trim()) {
+    if (!tournamentPlayerInput.trim()) {
       alert('Please enter a player name');
       return;
     }
     
-    if (tournamentPlayers.some(p => p.toLowerCase() === playerName.trim().toLowerCase())) {
+    if (tournamentPlayers.some(p => p.toLowerCase() === tournamentPlayerInput.trim().toLowerCase())) {
       alert('This player is already in the list');
       return;
     }
 
-    setTournamentPlayers([...tournamentPlayers, playerName.trim()]);
-    document.querySelector('.tournament-player-input').value = '';
+    setTournamentPlayers([...tournamentPlayers, tournamentPlayerInput.trim()]);
+    setTournamentPlayerInput('');
   };
 
   const handleRemoveTournamentPlayer = (playerName) => {
@@ -159,7 +198,24 @@ function GameManagement() {
     setShowPlayerListQuestion(false);
     setShowPlayerSelection(false);
     setShowGameConfig(false);
+    setShowBlindStructureQuestion(false);
+    setShowBlindStructureBuilder(false);
+    setShowCustomBlindBuilder(false);
+    setShowSaveStructure(false);
+    setShowLoadStructure(false);
     setTournamentPlayers([]);
+    setTournamentPlayerInput('');
+    setChipSet('standard');
+    setBlindDuration(15);
+    setCustomBlindLevels([]);
+    setNewLevelSmallBlind('');
+    setNewLevelBigBlind('');
+    setNewLevelDuration('15');
+    setIsBreakLevel(false);
+    setUseSameDuration(false);
+    setSavedDuration('15');
+    setEnableBBAntes(false);
+    setStructureName('');
     setGameConfig({
       gameType: '',
       maxPlayers: 10,
@@ -172,34 +228,52 @@ function GameManagement() {
       tournamentType: 'Standard',
       enableRebuys: true,
       autoDeleteAfterDays: 7,
-      playerList: []
+      playerList: [],
+      blindStructure: null,
+      tournamentStatus: 'Registering'
     });
   };
 
   const seatPlayersAutomatically = async (gameId, playerList, playersPerTable, numberOfTables) => {
     try {
+      console.log(`🎯 Starting automatic seating: ${playerList.length} players, ${numberOfTables} tables`);
+      
+      const totalPlayers = playerList.length;
+      const basePlayersPerTable = Math.floor(totalPlayers / numberOfTables);
+      const remainder = totalPlayers % numberOfTables;
+      
+      console.log(`📊 Base players per table: ${basePlayersPerTable}, Remainder: ${remainder}`);
+      
+      // Calculate how many players each table should get
+      // First 'remainder' tables get one extra player to balance the distribution
+      const tableSizes = [];
+      for (let i = 0; i < numberOfTables; i++) {
+        tableSizes.push(basePlayersPerTable + (i < remainder ? 1 : 0));
+      }
+      
+      console.log(`📋 Table sizes:`, tableSizes);
+      
       const playerDistribution = [];
-      let currentTable = 1;
-      let currentSeat = 1;
-
-      for (let i = 0; i < playerList.length; i++) {
-        playerDistribution.push({
-          playerName: playerList[i],
-          tableNumber: currentTable,
-          seatId: currentSeat
-        });
-
-        currentSeat++;
+      let playerIndex = 0;
+      
+      // Distribute players across tables based on calculated sizes
+      for (let tableNum = 1; tableNum <= numberOfTables; tableNum++) {
+        const playersForThisTable = tableSizes[tableNum - 1];
         
-        if (currentSeat > playersPerTable) {
-          currentTable++;
-          currentSeat = 1;
-          
-          if (currentTable > numberOfTables) {
-            currentTable = 1;
+        for (let seat = 1; seat <= playersForThisTable; seat++) {
+          if (playerIndex < totalPlayers) {
+            playerDistribution.push({
+              playerName: playerList[playerIndex],
+              tableNumber: tableNum,
+              seatId: seat
+            });
+            playerIndex++;
           }
         }
       }
+
+      console.log(`🪑 Created ${playerDistribution.length} seat assignments`);
+      console.log('Distribution breakdown:', playerDistribution.map(p => `${p.playerName} -> Table ${p.tableNumber} Seat ${p.seatId}`));
 
       const reservationPromises = playerDistribution.map(({ playerName, tableNumber, seatId }) =>
         fetch(`/api/games/${gameId}/reservations`, {
@@ -216,9 +290,13 @@ function GameManagement() {
       );
 
       await Promise.all(reservationPromises);
-      console.log(`Successfully seated ${playerList.length} players across ${numberOfTables} table(s)`);
+      
+      // Log the distribution for debugging
+      const distribution = tableSizes.map((size, idx) => `Table ${idx + 1}: ${size} players`).join(', ');
+      console.log(`✅ Successfully seated ${playerList.length} players across ${numberOfTables} table(s)`);
+      console.log(`📍 Final distribution: ${distribution}`);
     } catch (error) {
-      console.error('Error seating players:', error);
+      console.error('❌ Error seating players:', error);
       alert('Players were not automatically seated. You can add them manually.');
     }
   };
@@ -231,12 +309,262 @@ function GameManagement() {
     setShowGameConfig(true);
   };
 
-  const handleCreateGame = async () => {
+  // Check if we should show blind structure question or create game directly
+  const handleCreateGame = () => {
     if (!gameName.trim()) {
       alert('Please enter a game name');
       return;
     }
 
+    // If it's a tournament, show blind structure question
+    if (gameConfig.gameType === 'tournament') {
+      setShowGameConfig(false);
+      setShowBlindStructureQuestion(true);
+    } else {
+      // For cash games, create directly
+      createGameOnServer();
+    }
+  };
+
+  // Blind structure question handlers
+  const handleUseOwnBlindStructure = () => {
+    setShowBlindStructureQuestion(false);
+    setShowCustomBlindBuilder(true);
+  };
+
+  const handleUseBuiltInBlindStructure = () => {
+    setShowBlindStructureQuestion(false);
+    setShowBlindStructureBuilder(true);
+  };
+
+  const handleBackFromBlindQuestion = () => {
+    setShowBlindStructureQuestion(false);
+    setShowGameConfig(true);
+  };
+
+  const handleBackFromBlindBuilder = () => {
+    setShowBlindStructureBuilder(false);
+    setShowBlindStructureQuestion(true);
+  };
+
+  const handleBackFromCustomBuilder = () => {
+    setShowCustomBlindBuilder(false);
+    setShowBlindStructureQuestion(true);
+  };
+
+  const handleSaveStructure = () => {
+    if (customBlindLevels.length === 0) {
+      alert('Please add at least one blind level before saving');
+      return;
+    }
+    setShowSaveStructure(true);
+  };
+
+  const handleSaveStructureConfirm = () => {
+    if (!structureName.trim()) {
+      alert('Please enter a name for this structure');
+      return;
+    }
+
+    const structure = {
+      name: structureName.trim(),
+      levels: customBlindLevels,
+      enableBBAntes,
+      savedAt: new Date().toISOString()
+    };
+
+    // Get existing structures from localStorage
+    const storageKey = `blindStructures_${userEmail}`;
+    const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    
+    // Add new structure
+    existing.push(structure);
+    localStorage.setItem(storageKey, JSON.stringify(existing));
+
+    alert(`Blind structure "${structureName}" saved successfully!`);
+    setShowSaveStructure(false);
+    setStructureName('');
+  };
+
+  const handleLoadStructure = () => {
+    const storageKey = `blindStructures_${userEmail}`;
+    const structures = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    
+    if (structures.length === 0) {
+      alert('You have no saved blind structures yet');
+      return;
+    }
+
+    setSavedStructures(structures);
+    setShowLoadStructure(true);
+  };
+
+  const handleSelectStructure = (structure) => {
+    setCustomBlindLevels(structure.levels);
+    setEnableBBAntes(structure.enableBBAntes);
+    setShowLoadStructure(false);
+    alert(`Loaded structure: ${structure.name}`);
+  };
+
+  const handleDeleteStructure = (index) => {
+    if (!window.confirm('Are you sure you want to delete this blind structure?')) {
+      return;
+    }
+
+    const storageKey = `blindStructures_${userEmail}`;
+    const structures = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    structures.splice(index, 1);
+    localStorage.setItem(storageKey, JSON.stringify(structures));
+    setSavedStructures(structures);
+
+    if (structures.length === 0) {
+      setShowLoadStructure(false);
+    }
+  };
+
+  const handleAddBlindLevel = () => {
+    // For break levels, only duration is required
+    if (isBreakLevel) {
+      if (!newLevelDuration) {
+        alert('Please enter break duration');
+        return;
+      }
+      const duration = parseInt(newLevelDuration);
+      if (isNaN(duration) || duration <= 0) {
+        alert('Please enter a valid duration');
+        return;
+      }
+
+      const newLevel = {
+        level: customBlindLevels.length + 1,
+        isBreak: true,
+        duration
+      };
+
+      setCustomBlindLevels([...customBlindLevels, newLevel]);
+      setNewLevelDuration('');
+      setIsBreakLevel(false);
+      return;
+    }
+
+    // For regular levels, all fields required
+    if (!newLevelSmallBlind || !newLevelBigBlind || !newLevelDuration) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    const smallBlind = parseInt(newLevelSmallBlind);
+    const bigBlind = parseInt(newLevelBigBlind);
+    const duration = parseInt(newLevelDuration);
+
+    if (isNaN(smallBlind) || isNaN(bigBlind) || isNaN(duration)) {
+      alert('Please enter valid numbers');
+      return;
+    }
+
+    if (smallBlind <= 0 || bigBlind <= 0 || duration <= 0) {
+      alert('Values must be greater than 0');
+      return;
+    }
+
+    if (bigBlind <= smallBlind) {
+      alert('Big blind must be greater than small blind');
+      return;
+    }
+
+    const newLevel = {
+      level: customBlindLevels.length + 1,
+      smallBlind,
+      bigBlind,
+      duration,
+      bbAnte: enableBBAntes ? bigBlind : null
+    };
+
+    setCustomBlindLevels([...customBlindLevels, newLevel]);
+    setNewLevelSmallBlind('');
+    setNewLevelBigBlind('');
+    
+    // Save duration after first level
+    if (customBlindLevels.length === 0) {
+      setSavedDuration(newLevelDuration);
+    }
+    
+    // If using same duration, keep it; otherwise reset
+    if (!useSameDuration) {
+      setNewLevelDuration(savedDuration);
+    }
+  };
+
+  const handleRemoveBlindLevel = (index) => {
+    const updatedLevels = customBlindLevels.filter((_, i) => i !== index);
+    // Re-number the levels
+    const reNumbered = updatedLevels.map((level, i) => ({ ...level, level: i + 1 }));
+    setCustomBlindLevels(reNumbered);
+  };
+
+  const handleCreateGameWithCustomBlinds = () => {
+    if (customBlindLevels.length === 0) {
+      alert('Please add at least one blind level');
+      return;
+    }
+
+    const structure = {
+      chipSet: 'custom',
+      startingStack: null, // User didn't specify
+      blindDuration: null, // Variable per level
+      levels: customBlindLevels
+    };
+
+    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
+    setShowCustomBlindBuilder(false);
+    createGameOnServer();
+  };
+
+  const handleGenerateBlindStructure = () => {
+    // Generate blind structure based on chip set and duration
+    const structure = generateBlindStructure(chipSet, blindDuration);
+    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
+    setShowBlindStructureBuilder(false);
+    createGameOnServer();
+  };
+
+  // Generate a standard blind structure
+  const generateBlindStructure = (chipSetType, duration) => {
+    const levels = [];
+    const startingStack = chipSetType === 'standard' ? 10000 : 20000;
+    let smallBlind = chipSetType === 'standard' ? 25 : 50;
+    let bigBlind = chipSetType === 'standard' ? 50 : 100;
+
+    // Generate 15 blind levels
+    for (let i = 1; i <= 15; i++) {
+      levels.push({
+        level: i,
+        smallBlind,
+        bigBlind,
+        ante: i > 3 ? Math.floor(bigBlind / 10) : 0,
+        duration: duration
+      });
+
+      // Increase blinds progressively
+      if (i % 3 === 0) {
+        smallBlind *= 2;
+        bigBlind *= 2;
+      } else {
+        smallBlind = Math.floor(smallBlind * 1.5);
+        bigBlind = Math.floor(bigBlind * 1.5);
+      }
+    }
+
+    return {
+      chipSet: chipSetType,
+      startingStack,
+      blindDuration: duration,
+      levels
+    };
+  };
+
+  // Actually create the game on the server
+  const createGameOnServer = async () => {
     // Combine date and time for database (without timezone conversion)
     let gameDateTime = null;
     if (gameDate) {
@@ -274,11 +602,28 @@ function GameManagement() {
 
         setShowCreateGame(false);
         setShowGameConfig(false);
+        setShowBlindStructureQuestion(false);
+        setShowBlindStructureBuilder(false);
+        setShowCustomBlindBuilder(false);
+        setShowSaveStructure(false);
+        setShowLoadStructure(false);
         setGameName('');
         setGameDate('');
         setGameTime('');
         setGameNote('');
         setTournamentPlayers([]);
+        setTournamentPlayerInput('');
+        setChipSet('standard');
+        setBlindDuration(15);
+        setCustomBlindLevels([]);
+        setNewLevelSmallBlind('');
+        setNewLevelBigBlind('');
+        setNewLevelDuration('15');
+        setIsBreakLevel(false);
+        setUseSameDuration(false);
+        setSavedDuration('15');
+        setEnableBBAntes(false);
+        setStructureName('');
         setGameConfig({
           gameType: '',
           maxPlayers: 10,
@@ -291,7 +636,9 @@ function GameManagement() {
           tournamentType: 'Standard',
           enableRebuys: true,
           autoDeleteAfterDays: 7,
-          playerList: []
+          playerList: [],
+          blindStructure: null,
+          tournamentStatus: 'Registering'
         });
         fetchGames();
         // Navigate to the game table with the game ID
@@ -327,6 +674,9 @@ function GameManagement() {
   };
 
   const handleLogout = () => {
+    // Clear localStorage on logout
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userCode');
     navigate('/');
   };
 
@@ -1245,6 +1595,8 @@ function GameManagement() {
                     type="text"
                     placeholder="Enter player name"
                     className="player-input tournament-player-input"
+                    value={tournamentPlayerInput}
+                    onChange={(e) => setTournamentPlayerInput(e.target.value)}
                     onKeyPress={(e) => {
                       if (e.key === 'Enter') {
                         handleAddTournamentPlayer();
@@ -1299,6 +1651,435 @@ function GameManagement() {
                   style={{ flex: 1 }}
                 >
                   Continue ({tournamentPlayers.length} players)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Blind Structure Question Modal */}
+        {showBlindStructureQuestion && (
+          <div className="modal-overlay" onClick={handleBackFromBlindQuestion}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Tournament Blind Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '0.95rem' }}>
+                Would you like to use your own blind structure or let us help you create one?
+              </p>
+              
+              <div className="player-list-options">
+                <button onClick={handleUseOwnBlindStructure} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>📝</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>Use my own blind structure</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Manage blinds and timers yourself</span>
+                </button>
+                <button onClick={handleUseBuiltInBlindStructure} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>⚙️</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>Help me create a structure</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Auto-generate blinds and timers</span>
+                </button>
+              </div>
+
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
+                <button onClick={handleBackFromBlindQuestion} className="cancel-btn">
+                  ← Back
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Blind Structure Builder Modal */}
+        {showBlindStructureBuilder && (
+          <div className="modal-overlay" onClick={handleBackFromBlindBuilder}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Configure Blind Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '25px', fontSize: '0.95rem' }}>
+                Select your chip set and blind duration to generate a tournament structure
+              </p>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label className="config-label">Chip Set</label>
+                <select 
+                  value={chipSet}
+                  onChange={(e) => setChipSet(e.target.value)}
+                  className="config-select"
+                >
+                  <option value="standard">Standard (10,000 starting stack)</option>
+                  <option value="deep">Deep Stack (20,000 starting stack)</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '25px' }}>
+                <label className="config-label">Blind Duration (minutes)</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {[10, 15, 20, 30].map((duration) => (
+                    <button
+                      key={duration}
+                      onClick={() => setBlindDuration(duration)}
+                      className={blindDuration === duration ? 'duration-btn active' : 'duration-btn'}
+                      style={{
+                        flex: 1,
+                        padding: '12px',
+                        border: blindDuration === duration ? '2px solid #16a34a' : '2px solid #d1d5db',
+                        background: blindDuration === duration ? '#f0fdf4' : 'white',
+                        color: blindDuration === duration ? '#16a34a' : '#374151',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: blindDuration === duration ? '600' : '500',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {duration} min
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '8px' }}>
+                  Total tournament time: ~{Math.ceil(15 * blindDuration / 60)} hours
+                </p>
+              </div>
+
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleBackFromBlindBuilder} className="cancel-btn">
+                  ← Back
+                </button>
+                <button 
+                  onClick={handleGenerateBlindStructure} 
+                  className="confirm-btn"
+                  style={{ flex: 1 }}
+                >
+                  Generate Structure & Create Game
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Blind Structure Builder Modal */}
+        {showCustomBlindBuilder && (
+          <div className="modal-overlay" onClick={handleBackFromCustomBuilder}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '85vh', overflow: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <h3 style={{ margin: 0 }}>Custom Blind Structure</h3>
+                <button 
+                  onClick={handleLoadStructure}
+                  className="cancel-btn"
+                  style={{ background: '#3b82f6', color: 'white', border: 'none' }}
+                >
+                  📂 Load Saved
+                </button>
+              </div>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Add blind levels one by one. Configure options below.
+              </p>
+
+              {/* BB Ante Toggle */}
+              <div style={{ marginBottom: '20px', padding: '15px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.95rem', fontWeight: '500' }}>
+                  <input
+                    type="checkbox"
+                    checked={enableBBAntes}
+                    onChange={(e) => setEnableBBAntes(e.target.checked)}
+                    style={{ marginRight: '10px', width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                  Enable Big Blind Antes (BB Ante = Big Blind)
+                </label>
+              </div>
+
+              {/* Add new level form */}
+              <div style={{ marginBottom: '25px', padding: '20px', background: '#f9fafb', borderRadius: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h4 style={{ margin: 0, fontSize: '1rem', color: '#374151' }}>
+                    Add Level {customBlindLevels.length + 1}
+                  </h4>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.9rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={isBreakLevel}
+                      onChange={(e) => setIsBreakLevel(e.target.checked)}
+                      style={{ marginRight: '8px', width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    Break Level
+                  </label>
+                </div>
+
+                {isBreakLevel ? (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'end' }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="config-label" style={{ fontSize: '0.85rem' }}>Break Duration (min)</label>
+                      <input
+                        type="number"
+                        placeholder="15"
+                        value={newLevelDuration}
+                        onChange={(e) => setNewLevelDuration(e.target.value)}
+                        className="player-input"
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <button 
+                      onClick={handleAddBlindLevel}
+                      className="save-player-btn"
+                      style={{ height: '44px', padding: '0 20px' }}
+                    >
+                      Add Break
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '10px', alignItems: 'end' }}>
+                      <div>
+                        <label className="config-label" style={{ fontSize: '0.85rem' }}>Small Blind</label>
+                        <input
+                          type="number"
+                          placeholder="25"
+                          value={newLevelSmallBlind}
+                          onChange={(e) => setNewLevelSmallBlind(e.target.value)}
+                          className="player-input"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="config-label" style={{ fontSize: '0.85rem' }}>Big Blind</label>
+                        <input
+                          type="number"
+                          placeholder="50"
+                          value={newLevelBigBlind}
+                          onChange={(e) => setNewLevelBigBlind(e.target.value)}
+                          className="player-input"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="config-label" style={{ fontSize: '0.85rem' }}>Duration (min)</label>
+                        <input
+                          type="number"
+                          placeholder="15"
+                          value={newLevelDuration}
+                          onChange={(e) => setNewLevelDuration(e.target.value)}
+                          className="player-input"
+                          style={{ width: '100%' }}
+                          disabled={useSameDuration && customBlindLevels.length > 0}
+                        />
+                      </div>
+                      <button 
+                        onClick={handleAddBlindLevel}
+                        className="save-player-btn"
+                        style={{ height: '44px', padding: '0 20px' }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                    {customBlindLevels.length > 0 && (
+                      <div style={{ marginTop: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '0.85rem', color: '#6b7280' }}>
+                          <input
+                            type="checkbox"
+                            checked={useSameDuration}
+                            onChange={(e) => {
+                              setUseSameDuration(e.target.checked);
+                              if (e.target.checked) {
+                                setNewLevelDuration(savedDuration);
+                              }
+                            }}
+                            style={{ marginRight: '8px', width: '14px', height: '14px', cursor: 'pointer' }}
+                          />
+                          Use same duration ({savedDuration} min) for all future levels
+                        </label>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Blind levels table */}
+              {customBlindLevels.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px', marginBottom: '20px' }}>
+                  <p>No blind levels added yet. Add your first level above.</p>
+                </div>
+              ) : (
+                <div style={{ marginBottom: '20px' }}>
+                  <h4 style={{ marginBottom: '15px', fontSize: '1rem', color: '#374151' }}>
+                    Blind Levels ({customBlindLevels.length})
+                  </h4>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Level</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Small Blind</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Big Blind</th>
+                          {enableBBAntes && <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>BB Ante</th>}
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Duration</th>
+                          <th style={{ padding: '12px', textAlign: 'center', fontWeight: '600', color: '#374151' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customBlindLevels.map((level, index) => (
+                          <tr key={index} style={{ borderBottom: '1px solid #e5e7eb', background: level.isBreak ? '#fef3c7' : 'transparent' }}>
+                            <td style={{ padding: '12px', color: '#374151', fontWeight: level.isBreak ? '600' : '400' }}>
+                              {level.isBreak ? `Break ${level.level}` : level.level}
+                            </td>
+                            <td style={{ padding: '12px', color: '#374151' }}>
+                              {level.isBreak ? '—' : level.smallBlind}
+                            </td>
+                            <td style={{ padding: '12px', color: '#374151' }}>
+                              {level.isBreak ? '—' : level.bigBlind}
+                            </td>
+                            {enableBBAntes && (
+                              <td style={{ padding: '12px', color: '#374151' }}>
+                                {level.isBreak ? '—' : (level.bbAnte || '—')}
+                              </td>
+                            )}
+                            <td style={{ padding: '12px', color: '#374151' }}>{level.duration} min</td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <button 
+                                onClick={() => handleRemoveBlindLevel(index)}
+                                className="remove-player-btn"
+                                style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '12px' }}>
+                    Total tournament time: ~{Math.ceil(customBlindLevels.reduce((sum, level) => sum + level.duration, 0) / 60)} hours
+                  </p>
+                </div>
+              )}
+
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleBackFromCustomBuilder} className="cancel-btn">
+                  ← Back
+                </button>
+                <button 
+                  onClick={handleSaveStructure}
+                  className="cancel-btn"
+                  style={{ background: '#10b981', color: 'white', border: 'none' }}
+                  disabled={customBlindLevels.length === 0}
+                >
+                  💾 Save Structure
+                </button>
+                <button 
+                  onClick={handleCreateGameWithCustomBlinds} 
+                  className="confirm-btn"
+                  style={{ flex: 1 }}
+                  disabled={customBlindLevels.length === 0}
+                >
+                  Create Game ({customBlindLevels.length} levels)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Save Structure Name Modal */}
+        {showSaveStructure && (
+          <div className="modal-overlay" onClick={() => setShowSaveStructure(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+              <h3>Save Blind Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Give this blind structure a name so you can reuse it later.
+              </p>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <label className="config-label">Structure Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Standard Weekly Tournament"
+                  value={structureName}
+                  onChange={(e) => setStructureName(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveStructureConfirm();
+                    }
+                  }}
+                  className="player-input"
+                  style={{ width: '100%' }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => setShowSaveStructure(false)} className="cancel-btn">
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveStructureConfirm}
+                  className="confirm-btn"
+                  style={{ flex: 1 }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Load Saved Structures Modal */}
+        {showLoadStructure && (
+          <div className="modal-overlay" onClick={() => setShowLoadStructure(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '70vh', overflow: 'auto' }}>
+              <h3>Load Saved Blind Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Select a previously saved blind structure to load.
+              </p>
+
+              {savedStructures.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px' }}>
+                  <p>No saved structures found.</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                  {savedStructures.map((structure, index) => (
+                    <div 
+                      key={index}
+                      style={{
+                        padding: '15px',
+                        background: '#f9fafb',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ margin: '0 0 5px 0', fontSize: '1rem', color: '#111827' }}>
+                          {structure.name}
+                        </h4>
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: '#6b7280' }}>
+                          {structure.levels.length} levels • 
+                          {structure.enableBBAntes ? ' BB Antes enabled' : ' No BB Antes'} • 
+                          Saved {new Date(structure.savedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          onClick={() => handleSelectStructure(structure)}
+                          className="save-player-btn"
+                          style={{ padding: '8px 16px', fontSize: '0.9rem' }}
+                        >
+                          Load
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteStructure(index)}
+                          className="remove-player-btn"
+                          style={{ padding: '8px 12px', fontSize: '0.9rem' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button onClick={() => setShowLoadStructure(false)} className="cancel-btn" style={{ width: '100%' }}>
+                  Close
                 </button>
               </div>
             </div>

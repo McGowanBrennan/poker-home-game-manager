@@ -423,6 +423,8 @@ app.post('/api/games/:gameId/reservations', async (req, res) => {
     const { seatId, playerName, tableNumber } = req.body;
     const table = parseInt(tableNumber) || 1;
 
+    console.log(`📍 Creating reservation: ${playerName} -> Table ${table}, Seat ${seatId} (Game: ${gameId})`);
+
     if (!seatId || !playerName) {
       return res.status(400).json({ error: 'Seat ID and player name are required' });
     }
@@ -619,6 +621,126 @@ app.post('/api/games/:gameId/randomize-seating', async (req, res) => {
     });
     res.status(500).json({ 
       error: 'Failed to randomize seating',
+      details: error.message 
+    });
+  }
+});
+
+// Update game details (date, time, note)
+app.post('/api/games/:gameId/details', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { userEmail, gameDateTime, note } = req.body;
+
+    console.log('📝 Update game details request:', { gameId, userEmail, gameDateTime, note });
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      console.log('❌ No userEmail provided');
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    console.log('🔍 Game lookup result:', gameResult.rows);
+
+    if (gameResult.rows.length === 0) {
+      console.log('❌ Game not found');
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      console.log('❌ User is not game creator:', {
+        creator: gameResult.rows[0].created_by,
+        requestUser: userEmail
+      });
+      return res.status(403).json({ error: 'Only the game creator can update game details' });
+    }
+
+    console.log('✅ Authorization passed, updating game...');
+
+    // Update game details in database
+    const updateResult = await db.query(
+      'UPDATE games SET game_date_time = $1, note = $2 WHERE id = $3 RETURNING *',
+      [gameDateTime || null, note || null, gameId]
+    );
+
+    console.log('✅ Game updated successfully:', updateResult.rows[0]);
+
+    res.json({ 
+      success: true,
+      game: updateResult.rows[0]
+    });
+  } catch (error) {
+    console.error('❌ Error updating game details:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail
+    });
+    res.status(500).json({ 
+      error: 'Failed to update game details',
+      details: error.message 
+    });
+  }
+});
+
+// Update tournament status
+app.post('/api/games/:gameId/status', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { userEmail, status } = req.body;
+
+    console.log('Update tournament status request:', { gameId, userEmail, status });
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can update tournament status' });
+    }
+
+    // Update status in game configuration
+    const configs = await readGameConfigs();
+    let configId = null;
+    
+    // Find config by gameId
+    for (const [id, config] of Object.entries(configs)) {
+      if (config.gameId === gameId) {
+        configId = id;
+        break;
+      }
+    }
+
+    if (configId && configs[configId]) {
+      configs[configId].tournamentStatus = status;
+      await writeGameConfigs(configs);
+    }
+
+    res.json({ 
+      success: true,
+      status
+    });
+  } catch (error) {
+    console.error('Error updating tournament status:', error);
+    res.status(500).json({ 
+      error: 'Failed to update tournament status',
       details: error.message 
     });
   }
