@@ -285,7 +285,13 @@ app.get('/api/games/:gameId', async (req, res) => {
       createdAt: game.created_at,
       gameDateTime: game.game_date_time,
       note: game.note,
-      config: game.config || null  // Config is now stored directly in database as JSONB
+      config: game.config || null,  // Config is now stored directly in database as JSONB
+      // Timer state for tournaments
+      currentBlindLevel: game.current_blind_level || 0,
+      timeRemainingSeconds: game.time_remaining_seconds,
+      timerRunning: game.timer_running || false,
+      timerPaused: game.timer_paused || false,
+      timerLastUpdate: game.timer_last_update
     });
   } catch (error) {
     console.error('Error fetching game:', error);
@@ -717,6 +723,59 @@ app.post('/api/games/:gameId/update-details', async (req, res) => {
       error: 'Failed to update game details',
       details: error.message 
     });
+  }
+});
+
+// Update tournament timer state
+app.post('/api/games/:gameId/timer-state', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { userEmail, currentBlindLevel, timeRemainingSeconds, timerRunning, timerPaused } = req.body;
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can update timer state' });
+    }
+
+    // Update timer state in database
+    const updateResult = await db.query(
+      `UPDATE games 
+       SET current_blind_level = $1, 
+           time_remaining_seconds = $2, 
+           timer_running = $3, 
+           timer_paused = $4,
+           timer_last_update = NOW()
+       WHERE id = $5 
+       RETURNING *`,
+      [currentBlindLevel, timeRemainingSeconds, timerRunning, timerPaused, gameId]
+    );
+
+    res.json({ 
+      success: true,
+      timerState: {
+        currentBlindLevel: updateResult.rows[0].current_blind_level,
+        timeRemainingSeconds: updateResult.rows[0].time_remaining_seconds,
+        timerRunning: updateResult.rows[0].timer_running,
+        timerPaused: updateResult.rows[0].timer_paused
+      }
+    });
+  } catch (error) {
+    console.error('Error updating timer state:', error);
+    res.status(500).json({ error: 'Failed to update timer state' });
   }
 });
 

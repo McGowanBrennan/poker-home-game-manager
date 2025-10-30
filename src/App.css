@@ -578,6 +578,105 @@
   font-family: 'Courier New', monospace;
 }
 
+/* Blind Timer Display */
+.blind-timer-display {
+  padding: 14px 24px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.25) 100%);
+  border: 2px solid rgba(99, 102, 241, 0.5);
+  border-radius: 10px;
+  backdrop-filter: blur(10px);
+  box-shadow: 
+    0 4px 12px rgba(99, 102, 241, 0.3),
+    inset 0 2px 8px rgba(255, 255, 255, 0.15);
+  min-width: 280px;
+}
+
+.blind-timer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 10px;
+}
+
+.blind-timer-level {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+
+.blind-timer-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.blind-timer-countdown {
+  color: #fbbf24;
+  font-size: 1.6rem;
+  font-weight: 900;
+  font-family: 'Courier New', monospace;
+  text-shadow: 
+    0 2px 8px rgba(251, 191, 36, 0.6),
+    0 1px 4px rgba(0, 0, 0, 0.3);
+  letter-spacing: 2px;
+  transition: opacity 0.3s ease;
+}
+
+.timer-pause-btn {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  font-size: 1rem;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.timer-pause-btn:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.2) 100%);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.05);
+}
+
+.blind-timer-info {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.blind-info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.blind-info-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.blind-info-value {
+  color: #ffffff;
+  font-size: 1.1rem;
+  font-weight: 900;
+  font-family: 'Courier New', monospace;
+  text-shadow: 
+    0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 /* Buy-in Total Tracking */
 .player-avatar.has-total {
   position: relative;
@@ -1265,6 +1364,48 @@
 
   .prize-pool-amount {
     font-size: 0.9rem;
+  }
+
+  .blind-timer-display {
+    padding: 10px 16px;
+    min-width: 240px;
+  }
+
+  .blind-timer-header {
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .blind-timer-level {
+    font-size: 0.7rem;
+    letter-spacing: 0.8px;
+  }
+
+  .blind-timer-countdown {
+    font-size: 1.2rem;
+    letter-spacing: 1.5px;
+  }
+
+  .blind-timer-info {
+    gap: 12px;
+  }
+
+  .blind-info-label {
+    font-size: 0.6rem;
+  }
+
+  .blind-info-value {
+    font-size: 0.9rem;
+  }
+
+  .blind-timer-controls {
+    gap: 8px;
+  }
+
+  .timer-pause-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 0.85rem;
   }
 
   .header-datetime {
