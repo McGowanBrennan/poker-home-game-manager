@@ -1,0 +1,157 @@
+{
+  "26d428dbb134e8ba": {
+    "gameId": "HC0HTE",
+    "gameType": "tournament",
+    "maxPlayers": 24,
+    "numberOfTables": 4,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "100",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "createdAt": "2025-10-29T01:01:45.227Z"
+  },
+  "a14af45eb1adeeb6": {
+    "gameId": "XTY4B6",
+    "gameType": "tournament",
+    "maxPlayers": 24,
+    "numberOfTables": 3,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "100",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "createdAt": "2025-10-29T01:03:31.139Z"
+  },
+  "514d01f191c699a4": {
+    "gameId": "A6C29V",
+    "gameType": "tournament",
+    "maxPlayers": 16,
+    "numberOfTables": 2,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "100",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "createdAt": "2025-10-29T01:11:17.657Z"
+  },
+  "0a2bb7c26b586930": {
+    "gameId": "45HVGG",
+    "gameType": "tournament",
+    "maxPlayers": 10,
+    "numberOfTables": 3,
+    "playersPerTable": 8,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "100",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "playerList": [
+      "brenn",
+      "ry",
+      "dad",
+      "mom",
+      "bungle",
+      "richard",
+      "john l",
+      "travis",
+      "hank",
+      "t byrd",
+      "chris",
+      "noah",
+      "colby",
+      "anthoiny",
+      "jeff",
+      "andrew",
+      "trey"
+    ],
+    "blindStructure": null,
+    "createdAt": "2025-10-30T02:46:25.355Z",
+    "tournamentStatus": "Registering"
+  },
+  "59928d761588e1ca": {
+    "gameId": "WA3NWH",
+    "gameType": "tournament",
+    "maxPlayers": 10,
+    "numberOfTables": 1,
+    "playersPerTable": 10,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "playerList": [
+      "a"
+    ],
+    "blindStructure": null,
+    "tournamentStatus": "Registering",
+    "createdAt": "2025-10-30T03:00:16.098Z"
+  },
+  "ebaddcfa438fc874": {
+    "gameId": "5XH9PF",
+    "gameType": "tournament",
+    "maxPlayers": 10,
+    "numberOfTables": 1,
+    "playersPerTable": 10,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "2",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "playerList": [
+      "a"
+    ],
+    "blindStructure": [
+      {
+        "level": 1,
+        "smallBlind": 25,
+        "bigBlind": 50,
+        "duration": 15,
+        "bbAnte": null
+      }
+    ],
+    "tournamentStatus": "Registering",
+    "createdAt": "2025-10-30T03:02:16.148Z"
+  },
+  "7545b62d23fb7a81": {
+    "gameId": "OWUGN7",
+    "gameType": "tournament",
+    "maxPlayers": 10,
+    "numberOfTables": 1,
+    "playersPerTable": 10,
+    "pokerType": "NLH",
+    "smallBlind": "",
+    "bigBlind": "",
+    "buyInAmount": "1",
+    "tournamentType": "Standard",
+    "enableRebuys": true,
+    "autoDeleteAfterDays": 7,
+    "playerList": [
+      "breb",
+      "ry"
+    ],
+    "blindStructure": [
+      {
+        "level": 1,
+        "smallBlind": 25,
+        "bigBlind": 50,
+        "duration": 15,
+        "bbAnte": null
+      }
+    ],
+    "tournamentStatus": "Registering",
+    "createdAt": "2025-10-30T03:18:39.964Z"
+  }
+}
