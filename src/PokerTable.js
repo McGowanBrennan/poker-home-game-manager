@@ -20,6 +20,7 @@ function PokerTable() {
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
   const [editNote, setEditNote] = useState('');
+  const [showBlindStructure, setShowBlindStructure] = useState(false);
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -305,7 +306,7 @@ function PokerTable() {
   };
 
   const handleUpdateTournamentStatus = async () => {
-    const statuses = ['Registering', 'In Progress', 'Break', 'Final Table', 'Finished'];
+    const statuses = ['Registering', 'In Progress', 'Finished'];
     const currentIndex = statuses.indexOf(tournamentStatus);
     const nextIndex = (currentIndex + 1) % statuses.length;
     const newStatus = statuses[nextIndex];
@@ -370,7 +371,7 @@ function PokerTable() {
         note: editNote.trim() || null
       });
 
-      const response = await fetch(`/api/games/${gameId}/details`, {
+      const response = await fetch(`/api/games/${gameId}/update-details`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -416,17 +417,28 @@ function PokerTable() {
                 {gameId}
               </button>
             </div>
-            {isCreator ? (
-              <button 
-                onClick={handleRandomizeSeating} 
-                className="minimal-btn randomize-btn" 
-                title="Shuffle players and balance tables"
-              >
-                🔀 Shuffle
-              </button>
-            ) : (
-              <div className="header-spacer"></div>
-            )}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {gameConfig && gameConfig.gameType === 'tournament' && gameConfig.blindStructure && (
+                <button 
+                  onClick={() => setShowBlindStructure(true)}
+                  className="minimal-btn blinds-btn" 
+                  title="View blind structure"
+                >
+                  📊 Blinds
+                </button>
+              )}
+              {isCreator ? (
+                <button 
+                  onClick={handleRandomizeSeating} 
+                  className="minimal-btn randomize-btn" 
+                  title="Shuffle players and balance tables"
+                >
+                  🔀 Shuffle
+                </button>
+              ) : (
+                !gameConfig?.blindStructure && <div className="header-spacer"></div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -629,6 +641,104 @@ function PokerTable() {
                   }}
                 >
                   Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Blind Structure Modal */}
+        {showBlindStructure && gameConfig && gameConfig.blindStructure && (
+          <div className="modal-overlay" onClick={() => setShowBlindStructure(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '80vh', overflow: 'auto' }}>
+              <h3>Tournament Blind Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Complete blind schedule for this tournament
+              </p>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.95rem'
+                }}>
+                  <thead>
+                    <tr style={{ background: '#f3f4f6', borderBottom: '2px solid #d1d5db' }}>
+                      <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600' }}>Level</th>
+                      <th style={{ padding: '12px', textAlign: 'center', fontWeight: '600' }}>Small Blind</th>
+                      <th style={{ padding: '12px', textAlign: 'center', fontWeight: '600' }}>Big Blind</th>
+                      {gameConfig.blindStructure.some(level => level.bbAnte) && (
+                        <th style={{ padding: '12px', textAlign: 'center', fontWeight: '600' }}>BB Ante</th>
+                      )}
+                      <th style={{ padding: '12px', textAlign: 'center', fontWeight: '600' }}>Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gameConfig.blindStructure.map((level, index) => (
+                      <tr 
+                        key={index}
+                        style={{ 
+                          borderBottom: '1px solid #e5e7eb',
+                          background: level.isBreak ? '#fef3c7' : index % 2 === 0 ? '#ffffff' : '#f9fafb'
+                        }}
+                      >
+                        <td style={{ padding: '12px', fontWeight: '500' }}>
+                          {level.isBreak ? `Break ${level.level}` : `Level ${level.level}`}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          {level.isBreak ? '—' : level.smallBlind?.toLocaleString() || '—'}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          {level.isBreak ? '—' : level.bigBlind?.toLocaleString() || '—'}
+                        </td>
+                        {gameConfig.blindStructure.some(l => l.bbAnte) && (
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            {level.isBreak ? '—' : level.bbAnte?.toLocaleString() || '—'}
+                          </td>
+                        )}
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          {level.duration} min
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ 
+                marginTop: '20px', 
+                padding: '15px', 
+                background: '#f0fdf4', 
+                borderRadius: '8px',
+                border: '1px solid #bbf7d0'
+              }}>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#166534', fontWeight: '500' }}>
+                  ⏱️ Total Tournament Time: ~{Math.ceil(gameConfig.blindStructure.reduce((sum, level) => sum + level.duration, 0) / 60)} hours
+                </p>
+                <p style={{ margin: '5px 0 0 0', fontSize: '0.85rem', color: '#15803d' }}>
+                  {gameConfig.blindStructure.length} levels • 
+                  {gameConfig.blindStructure.filter(l => l.isBreak).length > 0 && 
+                    ` ${gameConfig.blindStructure.filter(l => l.isBreak).length} break(s) •`
+                  }
+                  {gameConfig.blindStructure.some(l => l.bbAnte) && ' BB Antes enabled'}
+                </p>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+                <button 
+                  onClick={() => setShowBlindStructure(false)}
+                  style={{
+                    padding: '12px 32px',
+                    fontSize: '1rem',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Close
                 </button>
               </div>
             </div>

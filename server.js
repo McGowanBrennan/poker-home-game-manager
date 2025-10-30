@@ -627,7 +627,7 @@ app.post('/api/games/:gameId/randomize-seating', async (req, res) => {
 });
 
 // Update game details (date, time, note)
-app.post('/api/games/:gameId/details', async (req, res) => {
+app.post('/api/games/:gameId/update-details', async (req, res) => {
   try {
     const { gameId } = req.params;
     const { userEmail, gameDateTime, note } = req.body;

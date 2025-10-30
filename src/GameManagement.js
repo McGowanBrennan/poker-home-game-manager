@@ -508,24 +508,17 @@ function GameManagement() {
       return;
     }
 
-    const structure = {
-      chipSet: 'custom',
-      startingStack: null, // User didn't specify
-      blindDuration: null, // Variable per level
-      levels: customBlindLevels
-    };
+    const structure = customBlindLevels; // Just use the levels array directly
 
-    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
     setShowCustomBlindBuilder(false);
-    createGameOnServer();
+    createGameOnServer(structure); // Pass structure directly
   };
 
   const handleGenerateBlindStructure = () => {
     // Generate blind structure based on chip set and duration
     const structure = generateBlindStructure(chipSet, blindDuration);
-    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
     setShowBlindStructureBuilder(false);
-    createGameOnServer();
+    createGameOnServer(structure); // Pass structure directly
   };
 
   // Generate a standard blind structure
@@ -564,7 +557,7 @@ function GameManagement() {
   };
 
   // Actually create the game on the server
-  const createGameOnServer = async () => {
+  const createGameOnServer = async (blindStructure = null) => {
     // Combine date and time for database (without timezone conversion)
     let gameDateTime = null;
     if (gameDate) {
@@ -575,6 +568,11 @@ function GameManagement() {
         gameDateTime = `${gameDate} 00:00:00`;
       }
     }
+
+    // Create config with blind structure if provided
+    const configToSend = blindStructure
+      ? { ...gameConfig, blindStructure }
+      : gameConfig;
 
     try {
       const response = await fetch('/api/games', {
@@ -587,7 +585,7 @@ function GameManagement() {
           createdBy: userEmail,
           gameDateTime,
           note: gameNote.trim() || null,
-          config: gameConfig
+          config: configToSend
         })
       });
 
@@ -1039,33 +1037,66 @@ function GameManagement() {
             </div>
           ) : (
             <div className="games-list">
-              {games.map((game) => (
-                <div key={game.id} className="game-card">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteGame(game.id, game.name);
-                    }}
-                    className="delete-game-btn"
-                    title="Delete game"
-                  >
-                    ✕
-                  </button>
-                  <div className="game-info">
-                    <h3>{game.name}</h3>
-                    <p className="game-code">Code: {game.id}</p>
-                    <p className="game-meta">
-                      Created {new Date(game.createdAt).toLocaleDateString()}
-                    </p>
+              {games.map((game) => {
+                // Determine status badge color
+                const getStatusColor = (status) => {
+                  switch(status) {
+                    case 'Registering': return '#10b981'; // green
+                    case 'In Progress': return '#f59e0b'; // yellow/orange
+                    case 'Finished': return '#ef4444'; // red
+                    default: return '#6b7280'; // gray
+                  }
+                };
+
+                const status = game.config?.tournamentStatus;
+                const isTournament = game.config?.gameType === 'tournament';
+
+                return (
+                  <div key={game.id} className="game-card">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteGame(game.id, game.name);
+                      }}
+                      className="delete-game-btn"
+                      title="Delete game"
+                    >
+                      ✕
+                    </button>
+                    <div className="game-info">
+                      <h3>{game.name}</h3>
+                      <p className="game-code">Code: {game.id}</p>
+                      {isTournament && status && (
+                        <div 
+                          className="tournament-status-badge"
+                          style={{ 
+                            backgroundColor: getStatusColor(status),
+                            color: 'white',
+                            padding: '4px 12px',
+                            borderRadius: '12px',
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            display: 'inline-block',
+                            marginTop: '8px',
+                            marginBottom: '4px'
+                          }}
+                        >
+                          {status}
+                        </div>
+                      )}
+                      <p className="game-meta">
+                        Created {new Date(game.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/table/${game.id}`, { state: { userEmail } })}
+                      className="join-btn"
+                    >
+                      Enter Game
+                    </button>
                   </div>
-                  <button
-                    onClick={() => navigate(`/table/${game.id}`, { state: { userEmail } })}
-                    className="join-btn"
-                  >
-                    Enter Game
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
