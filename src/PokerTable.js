@@ -110,7 +110,6 @@ function PokerTable() {
           // Allow initial load on page refresh, but prevent subsequent loads
           if (!hasLoadedTimerOnce.current) {
             shouldLoadTimerState = true;
-            hasLoadedTimerOnce.current = true;
             console.log('🔄 Initial load (user info pending)');
           } else {
             shouldLoadTimerState = false;
@@ -123,7 +122,6 @@ function PokerTable() {
         } else if (isCreator && !hasLoadedTimerOnce.current) {
           // Creator's first load
           shouldLoadTimerState = true;
-          hasLoadedTimerOnce.current = true;
           console.log('🆕 Creator - first load');
         } else {
           // Viewer - ALWAYS sync from DB to see manager's pause/resume actions
@@ -194,15 +192,43 @@ function PokerTable() {
             console.log('✅ Adjusted time remaining:', adjustedTimeRemaining, 'seconds');
           }
           
-          if (adjustedTimeRemaining !== null && adjustedTimeRemaining !== undefined) {
+          // If no timer state exists yet but tournament is In Progress, initialize timer immediately
+          const statusNow = gameData.config?.tournamentStatus;
+          if ((gameData.timeRemainingSeconds === null || gameData.timeRemainingSeconds === undefined) && statusNow === 'In Progress') {
+            if (gameData.config?.blindStructure && gameData.config.blindStructure.length > 0) {
+              const first = gameData.config.blindStructure[0];
+              const initSeconds = (parseInt(first.duration, 10) || 0) * 60;
+              setCurrentBlindLevel(0);
+              currentLevelRef.current = 0;
+              setTimeRemaining(initSeconds);
+              currentTimeRef.current = initSeconds;
+              setTimerRunning(true);
+              setTimerPaused(false);
+              // Attempt to persist initial state; server will authorize (only creator can succeed)
+              try {
+                await saveTimerState(0, initSeconds, true, false);
+                console.log('🆕 Initialized timer state on server');
+              } catch (e) {
+                console.log('ℹ️ Could not persist initial timer state (likely not creator)');
+              }
+              hasLoadedTimerOnce.current = true;
+            } else {
+              console.log('⏳ Blind structure missing; cannot initialize timer');
+            }
+          } else if (adjustedTimeRemaining !== null && adjustedTimeRemaining !== undefined) {
             setTimeRemaining(adjustedTimeRemaining);
             currentTimeRef.current = adjustedTimeRemaining;
+            // Mark timer as loaded once we have valid state
+            hasLoadedTimerOnce.current = true;
           }
-          if (gameData.timerRunning !== undefined) {
-            setTimerRunning(gameData.timerRunning);
-          }
-          if (gameData.timerPaused !== undefined) {
-            setTimerPaused(gameData.timerPaused);
+          // Only adopt server running/paused flags when server has a concrete time value
+          if (gameData.timeRemainingSeconds !== null && gameData.timeRemainingSeconds !== undefined) {
+            if (gameData.timerRunning !== undefined) {
+              setTimerRunning(gameData.timerRunning);
+            }
+            if (gameData.timerPaused !== undefined) {
+              setTimerPaused(gameData.timerPaused);
+            }
           }
           
           // Mark that initial mount is complete
@@ -749,6 +775,10 @@ function PokerTable() {
 
       if (response.ok) {
         setTournamentStatus(newStatus);
+        tournamentStatusRef.current = newStatus;
+        // Immediately fetch latest game state; if moving to In Progress, do a full timer sync
+        const skipTimerSync = newStatus !== 'In Progress';
+        fetchGameData(skipTimerSync);
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to update tournament status');
