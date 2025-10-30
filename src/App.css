@@ -6,7 +6,7 @@
 }
 
 .poker-room {
-  background: linear-gradient(135deg, #0a3d1f 0%, #0f5229 50%, #0a3d1f 100%);
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -102,6 +102,41 @@
 
 .game-code-minimal:active {
   transform: translateY(0);
+}
+
+.header-datetime {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 6px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.header-datetime:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.header-note {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  font-style: italic;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.header-note:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .minimal-btn {
@@ -258,15 +293,15 @@
   width: 100%;
   height: 100%;
   background: 
-    radial-gradient(ellipse at center, #1a7a42 0%, #0f5229 45%, #0a3d1f 100%);
+    radial-gradient(ellipse at center, #16a34a 0%, #15803d 45%, #14532d 100%);
   border-radius: 45% / 35%;
-  border: 16px solid #5d3a1a;
+  border: 16px solid #422006;
   box-shadow: 
-    inset 0 0 100px rgba(0, 0, 0, 0.4),
-    inset 0 0 60px rgba(26, 122, 66, 0.3),
-    0 15px 50px rgba(0, 0, 0, 0.5),
-    0 5px 20px rgba(0, 0, 0, 0.3),
-    0 0 0 3px rgba(139, 69, 19, 0.3);
+    inset 0 0 100px rgba(0, 0, 0, 0.5),
+    inset 0 0 60px rgba(22, 163, 74, 0.2),
+    0 15px 50px rgba(0, 0, 0, 0.6),
+    0 5px 20px rgba(0, 0, 0, 0.4),
+    0 0 0 3px rgba(120, 53, 15, 0.4);
   position: relative;
   overflow: visible;
 }
@@ -289,24 +324,30 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 10;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .tournament-status-btn {
-  padding: 20px 40px;
-  font-size: 1.5rem;
+  padding: 12px 28px;
+  font-size: 1.1rem;
   font-weight: 700;
   color: white;
   background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   border: 3px solid #1e40af;
-  border-radius: 16px;
+  border-radius: 10px;
   box-shadow: 
-    0 8px 20px rgba(59, 130, 246, 0.4),
+    0 6px 16px rgba(59, 130, 246, 0.4),
     inset 0 2px 8px rgba(255, 255, 255, 0.2);
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   transition: all 0.3s ease;
   cursor: default;
-  min-width: 250px;
+  white-space: nowrap;
 }
 
 .tournament-status-btn.clickable {
@@ -328,75 +369,272 @@
     inset 0 2px 8px rgba(255, 255, 255, 0.2);
 }
 
-/* Buy-in Tracking */
-.buyin-checkbox-container {
-  margin-top: 8px;
-  display: flex;
-  justify-content: center;
+/* Buy-In Popup */
+.buyin-popup {
+  max-width: 400px !important;
+  padding: 30px !important;
+  text-align: center;
 }
 
-.buyin-checkbox-label {
+.buyin-popup-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 4px 10px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 6px;
-  transition: background 0.2s ease;
+  justify-content: center;
+  gap: 20px;
+  margin: 30px 0;
 }
 
-.buyin-checkbox-label:hover {
-  background: rgba(0, 0, 0, 0.4);
-}
-
-.buyin-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #10b981;
-}
-
-.buyin-checkbox-text {
+.buyin-popup-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 3px solid #10b981;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
-  font-size: 0.85rem;
+  font-size: 2rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.buyin-popup-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.buyin-popup-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.buyin-popup-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background: #9ca3af;
+  border-color: #9ca3af;
+}
+
+.buyin-popup-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100px;
+}
+
+.buyin-popup-count {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #1f2937;
+  line-height: 1;
+}
+
+.buyin-popup-label {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: 8px;
   font-weight: 500;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  text-transform: lowercase;
+}
+
+.buyin-popup-total {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #10b981;
+  margin: 20px 0 30px 0;
+  padding: 15px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%);
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+}
+
+.buyin-popup-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.buyin-popup-remove {
+  padding: 12px 24px;
+  font-size: 1rem;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.buyin-popup-remove:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+.buyin-popup-done {
+  padding: 12px 32px;
+  font-size: 1rem;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.buyin-popup-done:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.buyin-addon-container {
+  margin: 20px 0;
+  padding: 15px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.08) 100%);
+  border: 2px solid rgba(59, 130, 246, 0.2);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.buyin-addon-container:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(37, 99, 235, 0.12) 100%);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.buyin-addon-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.buyin-addon-checkbox {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+
+.buyin-addon-text {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #1f2937;
 }
 
 /* Prize Pool Display */
 .prize-pool-display {
-  margin-top: 16px;
   padding: 12px 24px;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
-  border: 2px solid rgba(16, 185, 129, 0.4);
-  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.25) 100%);
+  border: 2px solid rgba(16, 185, 129, 0.5);
+  border-radius: 10px;
   backdrop-filter: blur(10px);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   box-shadow: 
-    0 4px 12px rgba(16, 185, 129, 0.2),
-    inset 0 2px 8px rgba(255, 255, 255, 0.1);
+    0 4px 12px rgba(16, 185, 129, 0.3),
+    inset 0 2px 8px rgba(255, 255, 255, 0.15);
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.prize-pool-display.clickable:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(5, 150, 105, 0.35) 100%);
+  border-color: rgba(16, 185, 129, 0.7);
+  transform: translateY(-2px);
+  box-shadow: 
+    0 6px 16px rgba(16, 185, 129, 0.4),
+    inset 0 2px 8px rgba(255, 255, 255, 0.2);
 }
 
 .prize-pool-label {
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 0.9rem;
-  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 
 .prize-pool-amount {
   color: #10b981;
-  font-size: 1.8rem;
+  font-size: 1.3rem;
   font-weight: 900;
   text-shadow: 
     0 2px 8px rgba(16, 185, 129, 0.6),
     0 0 20px rgba(16, 185, 129, 0.4);
   font-family: 'Courier New', monospace;
+}
+
+/* Buy-in Total Tracking */
+.player-avatar.has-total {
+  position: relative;
+  border: 3px solid #10b981;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
+  cursor: pointer;
+}
+
+.avatar-hover-amount {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.player-avatar.has-total:hover .avatar-hover-amount {
+  opacity: 1;
+}
+
+.player-avatar.has-total:hover .avatar-image {
+  opacity: 0;
+}
+
+.hover-amount-value {
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: white;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  line-height: 1;
+}
+
+.hover-amount-label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.9);
+  margin-top: 4px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.reserve-seat-btn.has-total {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: #ffffff;
+  border: 2px solid #10b981;
+  position: relative;
+  box-shadow: 
+    0 4px 12px rgba(16, 185, 129, 0.4),
+    0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
 .table-center-info {
@@ -501,10 +739,11 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 0.3s ease;
 }
 
 .reserve-seat-btn {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: white;
   padding: 10px 18px;
   border: none;
@@ -512,7 +751,7 @@
   font-weight: 600;
   font-size: 0.875rem;
   box-shadow: 
-    0 4px 12px rgba(59, 130, 246, 0.4),
+    0 4px 12px rgba(99, 102, 241, 0.5),
     0 2px 6px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
   cursor: pointer;
@@ -522,15 +761,15 @@
 .reserve-seat-btn:hover {
   transform: translateY(-2px);
   box-shadow: 
-    0 6px 20px rgba(59, 130, 246, 0.5),
+    0 6px 20px rgba(99, 102, 241, 0.6),
     0 2px 8px rgba(0, 0, 0, 0.2);
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
 }
 
 .reserve-seat-btn:active {
   transform: translateY(0);
   box-shadow: 
-    0 2px 8px rgba(59, 130, 246, 0.3),
+    0 2px 8px rgba(99, 102, 241, 0.4),
     0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
@@ -553,23 +792,25 @@
 /* Removable state for game creator */
 .reserve-seat-btn.reserved.removable {
   cursor: pointer;
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
   box-shadow: 
-    0 4px 12px rgba(220, 38, 38, 0.4),
+    0 4px 12px rgba(5, 150, 105, 0.4),
     0 2px 6px rgba(0, 0, 0, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
 }
 
 .reserve-seat-btn.reserved.removable:hover {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   transform: translateY(-2px);
   box-shadow: 
-    0 6px 20px rgba(239, 68, 68, 0.5),
+    0 6px 20px rgba(16, 185, 129, 0.6),
     0 2px 8px rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
 .reserve-seat-btn.reserved.removable:active {
   transform: translateY(0);
-  background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
 }
 
 /* Position 8 players equally spaced around the oval table */
@@ -688,6 +929,15 @@
   .player-avatar {
     width: 50px;
     height: 50px;
+  }
+
+  .hover-amount-value {
+    font-size: 1rem;
+  }
+
+  .hover-amount-label {
+    font-size: 0.55rem;
+    margin-top: 2px;
   }
   
   .reserve-seat-btn {
@@ -989,36 +1239,71 @@
     padding: 6px 12px;
   }
 
-  .tournament-status-btn {
-    padding: 15px 30px;
-    font-size: 1.2rem;
-    min-width: 200px;
-    letter-spacing: 1px;
-  }
-
-  .prize-pool-display {
-    padding: 10px 20px;
-  }
-
-  .prize-pool-label {
-    font-size: 0.8rem;
-  }
-
-  .prize-pool-amount {
-    font-size: 1.5rem;
-  }
-
-  .buyin-checkbox-text {
-    font-size: 0.8rem;
-  }
-
-  .table-center-info {
+  .tournament-status-container {
+    top: 50%;
+    gap: 8px;
+    flex-direction: column;
     max-width: 90%;
   }
 
-  .edit-details-btn {
-    font-size: 0.85rem;
-    padding: 6px 16px;
+  .tournament-status-btn {
+    padding: 6px 14px;
+    font-size: 0.75rem;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
   }
+
+  .prize-pool-display {
+    padding: 6px 12px;
+    gap: 6px;
+    flex-direction: row;
+  }
+
+  .prize-pool-label {
+    font-size: 0.6rem;
+  }
+
+  .prize-pool-amount {
+    font-size: 0.9rem;
+  }
+
+  .header-datetime {
+    font-size: 0.65rem;
+    padding: 3px 8px;
+    margin-top: 4px;
+  }
+
+  .header-note {
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    margin-top: 3px;
+    max-width: 150px;
+  }
+
+  .buyin-popup {
+    padding: 20px !important;
+  }
+
+  .buyin-popup-controls {
+    gap: 15px;
+    margin: 20px 0;
+  }
+
+  .buyin-popup-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.5rem;
+  }
+
+  .buyin-popup-count {
+    font-size: 2.5rem;
+  }
+
+  .buyin-popup-total {
+    font-size: 1.2rem;
+    padding: 12px;
+  }
+
+  /* table-center-info removed - using header for date/time/note */
 }
 

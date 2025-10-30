@@ -351,16 +351,18 @@ app.get('/api/games/:gameId/reservations', async (req, res) => {
     const table = parseInt(tableNumber) || 1;
 
     const result = await db.query(
-      'SELECT seat_id, player_name, paid_buyin FROM reservations WHERE game_id = $1 AND table_number = $2',
+      'SELECT seat_id, player_name, paid_buyin, owed_amount, addon_purchased FROM reservations WHERE game_id = $1 AND table_number = $2',
       [gameId, table]
     );
 
-    // Convert to object format {seatId: {playerName, paidBuyin}}
+    // Convert to object format {seatId: {playerName, paidBuyin, owedAmount, addOnPurchased}}
     const reservations = {};
     result.rows.forEach(row => {
       reservations[row.seat_id] = {
         playerName: row.player_name,
-        paidBuyin: row.paid_buyin || false
+        paidBuyin: row.paid_buyin || false,
+        owedAmount: parseFloat(row.owed_amount) || 0,
+        addOnPurchased: row.addon_purchased || false
       };
     });
 
@@ -480,11 +482,11 @@ app.delete('/api/games/:gameId/reservations/:seatId', async (req, res) => {
   }
 });
 
-// Mark player as paid for tournament buy-in
-app.patch('/api/games/:gameId/reservations/:seatId/paid', async (req, res) => {
+// Update player buy-in count
+app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => {
   try {
     const { gameId, seatId } = req.params;
-    const { tableNumber, paid, userEmail } = req.body;
+    const { tableNumber, buyInCount, userEmail, buyInAmount, addOnPurchased, addOnCost } = req.body;
     const table = parseInt(tableNumber) || 1;
 
     // Check if userEmail is provided
@@ -503,31 +505,54 @@ app.patch('/api/games/:gameId/reservations/:seatId/paid', async (req, res) => {
     }
 
     if (gameResult.rows[0].created_by !== userEmail) {
-      return res.status(403).json({ error: 'Only the game creator can mark buy-ins as paid' });
+      return res.status(403).json({ error: 'Only the game creator can update buy-ins' });
     }
 
-    // Update the paid status
-    const updateResult = await db.query(
-      'UPDATE reservations SET paid_buyin = $1 WHERE game_id = $2 AND seat_id = $3 AND table_number = $4 RETURNING *',
-      [paid, gameId, parseInt(seatId), table]
+    // Get current reservation
+    const currentReservation = await db.query(
+      'SELECT owed_amount, addon_purchased FROM reservations WHERE game_id = $1 AND seat_id = $2 AND table_number = $3',
+      [gameId, parseInt(seatId), table]
     );
 
-    if (updateResult.rows.length === 0) {
+    if (currentReservation.rows.length === 0) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
+    // Calculate new total based on buy-in count
+    const count = Math.max(0, parseInt(buyInCount) || 0);
+    let newTotal = count * parseFloat(buyInAmount || 0);
+    
+    // Add add-on cost if purchased
+    const hasAddOn = addOnPurchased === true || addOnPurchased === 'true';
+    if (hasAddOn && addOnCost) {
+      // Parse add-on cost (remove $ if present)
+      const parsedAddOnCost = parseFloat(String(addOnCost).replace('$', ''));
+      newTotal += parsedAddOnCost;
+    }
+    
+    const isPaid = count > 0;
+
+    // Update the buy-in count, total amount, and add-on status
+    const updateResult = await db.query(
+      'UPDATE reservations SET paid_buyin = $1, owed_amount = $2, addon_purchased = $3 WHERE game_id = $4 AND seat_id = $5 AND table_number = $6 RETURNING *',
+      [isPaid, newTotal, hasAddOn, gameId, parseInt(seatId), table]
+    );
+
     res.json({
       success: true,
-      message: paid ? 'Player marked as paid' : 'Player marked as unpaid',
+      message: `Buy-in count updated to ${count}${hasAddOn ? ' (add-on purchased)' : ''}`,
       reservation: {
         seatId: updateResult.rows[0].seat_id,
         playerName: updateResult.rows[0].player_name,
-        paidBuyin: updateResult.rows[0].paid_buyin
+        paidBuyin: updateResult.rows[0].paid_buyin,
+        owedAmount: parseFloat(updateResult.rows[0].owed_amount),
+        buyInCount: count,
+        addOnPurchased: updateResult.rows[0].addon_purchased
       }
     });
   } catch (error) {
-    console.error('Error updating buy-in status:', error);
-    res.status(500).json({ error: 'Failed to update buy-in status' });
+    console.error('Error updating buy-in count:', error);
+    res.status(500).json({ error: 'Failed to update buy-in count' });
   }
 });
 

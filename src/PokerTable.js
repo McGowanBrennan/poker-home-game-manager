@@ -21,6 +21,8 @@ function PokerTable() {
   const [editTime, setEditTime] = useState('');
   const [editNote, setEditNote] = useState('');
   const [showBlindStructure, setShowBlindStructure] = useState(false);
+  const [buyInPopupPlayer, setBuyInPopupPlayer] = useState(null); // {seatId, playerName, buyInCount, owedAmount}
+  const [showPayoutStructure, setShowPayoutStructure] = useState(false);
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -270,9 +272,9 @@ function PokerTable() {
     }
   };
 
-  const handleMarkPaid = async (seatId, paid) => {
+  const handleUpdateBuyInCount = async (seatId, newCount, addOnPurchased = false) => {
     try {
-      const response = await fetch(`/api/games/${gameId}/reservations/${seatId}/paid`, {
+      const response = await fetch(`/api/games/${gameId}/reservations/${seatId}/buyins`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -280,42 +282,64 @@ function PokerTable() {
         body: JSON.stringify({
           userEmail: userEmail,
           tableNumber: currentTable,
-          paid: paid
+          buyInCount: newCount,
+          buyInAmount: gameConfig?.buyInAmount || 0,
+          addOnPurchased: addOnPurchased,
+          addOnCost: gameConfig?.addOnCost || 0
         })
       });
 
       if (response.ok) {
-        // Update local state
+        const data = await response.json();
+        // Update local state with new values from server
         setReservedSeats(prev => ({
           ...prev,
           [seatId]: {
             ...prev[seatId],
-            paidBuyin: paid
+            paidBuyin: data.reservation.paidBuyin,
+            owedAmount: data.reservation.owedAmount,
+            addOnPurchased: data.reservation.addOnPurchased
           }
         }));
       } else {
         const error = await response.json();
-        alert(error.error || 'Failed to update buy-in status');
+        alert(error.error || 'Failed to update buy-in count');
       }
     } catch (error) {
-      console.error('Error marking player as paid:', error);
-      alert('Failed to update buy-in status. Please try again.');
+      console.error('Error updating buy-in count:', error);
+      alert('Failed to update buy-in count. Please try again.');
     }
   };
 
   // Check if current user is the game creator
   const isCreator = userEmail && gameCreator && userEmail === gameCreator;
 
-  // Calculate prize pool (number of players who have paid * buy-in amount)
+  // Calculate prize pool (sum of all buy-ins across all players)
   const calculatePrizePool = () => {
-    if (!gameConfig || gameConfig.gameType !== 'tournament' || !gameConfig.buyInAmount) {
+    if (!gameConfig || gameConfig.gameType !== 'tournament') {
       return 0;
     }
     
-    const buyIn = parseFloat(gameConfig.buyInAmount) || 0;
-    const paidCount = Object.values(reservedSeats).filter(r => r.paidBuyin).length;
+    // Sum up all owed amounts (which represents total buy-ins)
+    const total = Object.values(reservedSeats).reduce((sum, reservation) => {
+      return sum + (parseFloat(reservation.owedAmount) || 0);
+    }, 0);
     
-    return buyIn * paidCount;
+    return total;
+  };
+
+  // Calculate actual payouts based on prize pool and payout structure
+  const calculatePayouts = () => {
+    const prizePool = calculatePrizePool();
+    if (!gameConfig?.payoutStructure || prizePool === 0) {
+      return [];
+    }
+
+    return gameConfig.payoutStructure.map(payout => ({
+      position: payout.position,
+      percentage: payout.percentage,
+      amount: (prizePool * payout.percentage) / 100
+    }));
   };
 
   const handleRandomizeSeating = async () => {
@@ -461,6 +485,16 @@ function PokerTable() {
               <button onClick={handleCopyGameLink} className="game-code-minimal" title="Click to copy invite link">
                 {gameId}
               </button>
+              {gameDateTime && (
+                <div className="header-datetime" onClick={isCreator ? handleOpenEditDetails : undefined} style={{ cursor: isCreator ? 'pointer' : 'default' }} title={isCreator ? 'Click to edit' : ''}>
+                  📅 {formatGameDateTime(gameDateTime)}
+                </div>
+              )}
+              {gameNote && (
+                <div className="header-note" onClick={isCreator ? handleOpenEditDetails : undefined} style={{ cursor: isCreator ? 'pointer' : 'default' }} title={isCreator ? 'Click to edit' : ''}>
+                  {gameNote}
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               {gameConfig && gameConfig.gameType === 'tournament' && gameConfig.blindStructure && (
@@ -493,11 +527,26 @@ function PokerTable() {
               const reservation = reservedSeats[player.id];
               const isReserved = !!reservation;
               const playerName = reservation?.playerName || '';
-              const isPaid = reservation?.paidBuyin || false;
+              const owedAmount = reservation?.owedAmount || 0;
+              const buyInAmount = parseFloat(gameConfig?.buyInAmount) || 0;
+              const buyInCount = buyInAmount > 0 ? Math.round(owedAmount / buyInAmount) : 0;
+              const hasTotal = owedAmount > 0;
               
               const handleButtonClick = () => {
                 if (isReserved && isCreator) {
-                  handleRemoveReservation(player.id);
+                  // Open buy-in popup for tournaments during registration
+                  if (gameConfig?.gameType === 'tournament' && tournamentStatus === 'Registering') {
+                    setBuyInPopupPlayer({
+                      seatId: player.id,
+                      playerName,
+                      buyInCount,
+                      owedAmount,
+                      addOnPurchased: reservation?.addOnPurchased || false
+                    });
+                  } else {
+                    // For non-tournaments or other statuses, remove directly
+                    handleRemoveReservation(player.id);
+                  }
                 } else if (!isReserved) {
                   handleReserveSeat(player.id);
                 }
@@ -505,38 +554,33 @@ function PokerTable() {
               
               return (
                 <div key={player.id} className={`player-seat ${player.position}`}>
-                  <div className={`player-avatar ${isReserved ? 'reserved' : ''}`}>
+                  <div 
+                    className={`player-avatar ${isReserved ? 'reserved' : ''} ${hasTotal ? 'has-total' : ''}`}
+                  >
                     {isReserved && (
-                      <img 
-                        src="/player-avatar.png" 
-                        alt={playerName}
-                        className="avatar-image"
-                      />
+                      <>
+                        <img 
+                          src="/player-avatar.png" 
+                          alt={playerName}
+                          className="avatar-image"
+                        />
+                        {hasTotal && (
+                          <div className="avatar-hover-amount">
+                            <div className="hover-amount-value">${owedAmount.toFixed(0)}</div>
+                            <div className="hover-amount-label">{buyInCount} buy-in{buyInCount !== 1 ? 's' : ''}</div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <button 
-                    className={`reserve-seat-btn ${isReserved ? 'reserved' : ''} ${isReserved && isCreator ? 'removable' : ''}`}
+                    className={`reserve-seat-btn ${isReserved ? 'reserved' : ''} ${isReserved && isCreator ? 'removable' : ''} ${hasTotal ? 'has-total' : ''}`}
                     onClick={handleButtonClick}
                     disabled={isReserved && !isCreator}
-                    title={isReserved && isCreator ? 'Click to remove player' : ''}
+                    title={isReserved ? (isCreator ? `${playerName} (click to manage)` : playerName) : ''}
                   >
                     {isReserved ? playerName : 'Reserve Seat'}
                   </button>
-                  
-                  {/* Buy-in checkbox - only show for game creator during registration */}
-                  {isReserved && isCreator && gameConfig && gameConfig.gameType === 'tournament' && tournamentStatus === 'Registering' && (
-                    <div className="buyin-checkbox-container">
-                      <label className="buyin-checkbox-label">
-                        <input 
-                          type="checkbox"
-                          checked={isPaid}
-                          onChange={(e) => handleMarkPaid(player.id, e.target.checked)}
-                          className="buyin-checkbox"
-                        />
-                        <span className="buyin-checkbox-text">Paid</span>
-                      </label>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -555,34 +599,15 @@ function PokerTable() {
                 
                 {/* Prize Pool Display - Show during Registering status */}
                 {tournamentStatus === 'Registering' && gameConfig.buyInAmount && (
-                  <div className="prize-pool-display">
+                  <div 
+                    className="prize-pool-display clickable"
+                    onClick={() => gameConfig?.payoutStructure && setShowPayoutStructure(true)}
+                    style={{ cursor: gameConfig?.payoutStructure ? 'pointer' : 'default' }}
+                    title={gameConfig?.payoutStructure ? 'Click to view payout structure' : ''}
+                  >
                     <span className="prize-pool-label">Prize Pool:</span>
                     <span className="prize-pool-amount">${calculatePrizePool()}</span>
                   </div>
-                )}
-              </div>
-            )}
-
-            {(gameDateTime || gameNote || isCreator) && (
-              <div className="table-center-info">
-                {gameDateTime && (
-                  <p className="table-date-time">
-                    📅 {formatGameDateTime(gameDateTime)}
-                  </p>
-                )}
-                {gameNote && (
-                  <p className="table-game-note">
-                    {gameNote}
-                  </p>
-                )}
-                {isCreator && (
-                  <button 
-                    className="edit-details-btn"
-                    onClick={handleOpenEditDetails}
-                    title="Edit game date, time, and note"
-                  >
-                    ✏️ Edit Details
-                  </button>
                 )}
               </div>
             )}
@@ -798,6 +823,229 @@ function PokerTable() {
               <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
                 <button 
                   onClick={() => setShowBlindStructure(false)}
+                  style={{
+                    padding: '12px 32px',
+                    fontSize: '1rem',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Buy-In Management Popup */}
+        {buyInPopupPlayer && (
+          <div className="modal-overlay" onClick={() => setBuyInPopupPlayer(null)}>
+            <div className="modal-content buyin-popup" onClick={(e) => e.stopPropagation()}>
+              <button 
+                className="modal-close" 
+                onClick={() => setBuyInPopupPlayer(null)}
+                style={{ position: 'absolute', top: '10px', right: '10px' }}
+              >
+                ×
+              </button>
+              
+              <h3 style={{ margin: '0 0 20px 0', fontSize: '1.3rem', color: '#1f2937' }}>
+                {buyInPopupPlayer.playerName}
+              </h3>
+              
+              <div className="buyin-popup-controls">
+                <button 
+                  className="buyin-popup-btn minus"
+                  onClick={() => {
+                    const newCount = Math.max(0, buyInPopupPlayer.buyInCount - 1);
+                    const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
+                    const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
+                    const newTotal = buyInCost + addOnCostParsed;
+                    
+                    handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
+                    setBuyInPopupPlayer({
+                      ...buyInPopupPlayer,
+                      buyInCount: newCount,
+                      owedAmount: newTotal
+                    });
+                  }}
+                  disabled={buyInPopupPlayer.buyInCount === 0}
+                >
+                  −
+                </button>
+                
+                <div className="buyin-popup-display">
+                  <div className="buyin-popup-count">{buyInPopupPlayer.buyInCount}</div>
+                  <div className="buyin-popup-label">
+                    buy-in{buyInPopupPlayer.buyInCount !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                
+                <button 
+                  className="buyin-popup-btn plus"
+                  onClick={() => {
+                    const newCount = buyInPopupPlayer.buyInCount + 1;
+                    const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
+                    const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
+                    const newTotal = buyInCost + addOnCostParsed;
+                    
+                    handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
+                    setBuyInPopupPlayer({
+                      ...buyInPopupPlayer,
+                      buyInCount: newCount,
+                      owedAmount: newTotal
+                    });
+                  }}
+                >
+                  +
+                </button>
+              </div>
+              
+              {/* Add-On Checkbox (only show if add-ons are enabled) */}
+              {gameConfig?.enableAddOn && (
+                <div className="buyin-addon-container">
+                  <label className="buyin-addon-label">
+                    <input
+                      type="checkbox"
+                      checked={buyInPopupPlayer.addOnPurchased}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        const buyInCost = buyInPopupPlayer.buyInCount * (parseFloat(gameConfig?.buyInAmount) || 0);
+                        const addOnCostParsed = isChecked ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
+                        const newTotal = buyInCost + addOnCostParsed;
+                        
+                        handleUpdateBuyInCount(buyInPopupPlayer.seatId, buyInPopupPlayer.buyInCount, isChecked);
+                        setBuyInPopupPlayer({
+                          ...buyInPopupPlayer,
+                          addOnPurchased: isChecked,
+                          owedAmount: newTotal
+                        });
+                      }}
+                      className="buyin-addon-checkbox"
+                    />
+                    <span className="buyin-addon-text">
+                      Add-On ({gameConfig?.addOnCost} for {gameConfig?.addOnChips?.toLocaleString()} chips)
+                    </span>
+                  </label>
+                </div>
+              )}
+              
+              <div className="buyin-popup-total">
+                Total: ${buyInPopupPlayer.owedAmount.toFixed(2)}
+              </div>
+              
+              <div className="buyin-popup-actions">
+                <button 
+                  className="buyin-popup-remove"
+                  onClick={() => {
+                    handleRemoveReservation(buyInPopupPlayer.seatId);
+                    setBuyInPopupPlayer(null);
+                  }}
+                >
+                  🗑️ Remove Player
+                </button>
+                
+                <button 
+                  className="buyin-popup-done"
+                  onClick={() => setBuyInPopupPlayer(null)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payout Structure Modal */}
+        {showPayoutStructure && (
+          <div className="modal-overlay" onClick={() => setShowPayoutStructure(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowPayoutStructure(false)}
+                style={{ position: 'absolute', top: '10px', right: '10px' }}
+              >
+                ×
+              </button>
+              
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '1.4rem', color: '#1f2937' }}>
+                💰 Prize Pool Payouts
+              </h3>
+              
+              <div style={{ 
+                padding: '15px', 
+                background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', 
+                borderRadius: '10px',
+                border: '2px solid #86efac',
+                marginBottom: '20px',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '0.9rem', color: '#065f46', fontWeight: '600', marginBottom: '5px' }}>
+                  Total Prize Pool
+                </div>
+                <div style={{ fontSize: '2.5rem', fontWeight: '900', color: '#059669' }}>
+                  ${calculatePrizePool().toFixed(2)}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#374151' }}>
+                  Payout Structure
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {calculatePayouts().map((payout) => (
+                    <div 
+                      key={payout.position}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '15px',
+                        background: payout.position <= 3 
+                          ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)' 
+                          : '#f9fafb',
+                        borderRadius: '8px',
+                        border: payout.position <= 3 
+                          ? '2px solid #fbbf24' 
+                          : '1px solid #e5e7eb',
+                        boxShadow: payout.position === 1 
+                          ? '0 4px 12px rgba(251, 191, 36, 0.3)' 
+                          : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span style={{ fontSize: '1.5rem' }}>
+                          {payout.position === 1 ? '🥇' : payout.position === 2 ? '🥈' : payout.position === 3 ? '🥉' : `${payout.position}th`}
+                        </span>
+                        <div>
+                          <div style={{ fontWeight: '600', color: '#111827', fontSize: '1rem' }}>
+                            {payout.position === 1 ? '1st Place' : payout.position === 2 ? '2nd Place' : payout.position === 3 ? '3rd Place' : `${payout.position}th Place`}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                            {payout.percentage}%
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ 
+                        fontSize: '1.5rem', 
+                        fontWeight: '900', 
+                        color: payout.position === 1 ? '#059669' : '#374151',
+                        fontFamily: 'Courier New, monospace'
+                      }}>
+                        ${payout.amount.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+                <button 
+                  onClick={() => setShowPayoutStructure(false)}
                   style={{
                     padding: '12px 32px',
                     fontSize: '1rem',

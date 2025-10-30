@@ -52,6 +52,14 @@ function GameManagement() {
   const [showLoadStructure, setShowLoadStructure] = useState(false);
   const [savedStructures, setSavedStructures] = useState([]);
   
+  // Prize pool payout state
+  const [showPrizePoolConfig, setShowPrizePoolConfig] = useState(false);
+  const [payoutStructure, setPayoutStructure] = useState([
+    { position: 1, percentage: 50 },
+    { position: 2, percentage: 30 },
+    { position: 3, percentage: 20 }
+  ]);
+  
   const [gameConfig, setGameConfig] = useState({
     gameType: '',
     maxPlayers: 10,
@@ -63,9 +71,13 @@ function GameManagement() {
     buyInAmount: '',
     tournamentType: 'Standard',
     enableRebuys: true,
+    enableAddOn: false,
+    addOnCost: '',
+    addOnChips: '',
     autoDeleteAfterDays: 7,
     playerList: [],
     blindStructure: null, // Will store the blind structure configuration
+    payoutStructure: null, // Will store the prize pool payout configuration
     tournamentStatus: 'Registering' // Default status for tournaments
   });
 
@@ -203,6 +215,7 @@ function GameManagement() {
     setShowCustomBlindBuilder(false);
     setShowSaveStructure(false);
     setShowLoadStructure(false);
+    setShowPrizePoolConfig(false);
     setTournamentPlayers([]);
     setTournamentPlayerInput('');
     setChipSet('standard');
@@ -216,6 +229,11 @@ function GameManagement() {
     setSavedDuration('15');
     setEnableBBAntes(false);
     setStructureName('');
+    setPayoutStructure([
+      { position: 1, percentage: 50 },
+      { position: 2, percentage: 30 },
+      { position: 3, percentage: 20 }
+    ]);
     setGameConfig({
       gameType: '',
       maxPlayers: 10,
@@ -227,9 +245,13 @@ function GameManagement() {
       buyInAmount: '',
       tournamentType: 'Standard',
       enableRebuys: true,
+      enableAddOn: false,
+      addOnCost: '',
+      addOnChips: '',
       autoDeleteAfterDays: 7,
       playerList: [],
       blindStructure: null,
+      payoutStructure: null,
       tournamentStatus: 'Registering'
     });
   };
@@ -550,15 +572,94 @@ function GameManagement() {
 
     const structure = customBlindLevels; // Just use the levels array directly
 
+    // Save blind structure to state
+    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
+    
     setShowCustomBlindBuilder(false);
-    createGameOnServer(structure); // Pass structure directly
+    setShowPrizePoolConfig(true); // Go to prize pool config
   };
 
   const handleGenerateBlindStructure = () => {
     // Generate blind structure based on chip set and duration
     const structure = generateBlindStructure(chipSet, blindDuration);
+    
+    // Save blind structure to state
+    setGameConfig(prev => ({ ...prev, blindStructure: structure }));
+    
     setShowBlindStructureBuilder(false);
-    createGameOnServer(structure); // Pass structure directly
+    setShowPrizePoolConfig(true); // Go to prize pool config
+  };
+
+  // Prize pool configuration handlers
+  const handleAddPayoutPosition = () => {
+    const nextPosition = payoutStructure.length + 1;
+    setPayoutStructure([...payoutStructure, { position: nextPosition, percentage: 0 }]);
+  };
+
+  const handleRemovePayoutPosition = (position) => {
+    const updated = payoutStructure
+      .filter(p => p.position !== position)
+      .map((p, index) => ({ ...p, position: index + 1 }));
+    setPayoutStructure(updated);
+  };
+
+  const handlePayoutPercentageChange = (position, value) => {
+    const percentage = parseFloat(value) || 0;
+    setPayoutStructure(prev =>
+      prev.map(p => p.position === position ? { ...p, percentage } : p)
+    );
+  };
+
+  const calculateTotalPayout = () => {
+    return payoutStructure.reduce((sum, p) => sum + p.percentage, 0);
+  };
+
+  const handleLoadStandardPayout = (positions) => {
+    const standards = {
+      3: [
+        { position: 1, percentage: 50 },
+        { position: 2, percentage: 30 },
+        { position: 3, percentage: 20 }
+      ],
+      4: [
+        { position: 1, percentage: 50 },
+        { position: 2, percentage: 25 },
+        { position: 3, percentage: 15 },
+        { position: 4, percentage: 10 }
+      ],
+      5: [
+        { position: 1, percentage: 40 },
+        { position: 2, percentage: 25 },
+        { position: 3, percentage: 20 },
+        { position: 4, percentage: 10 },
+        { position: 5, percentage: 5 }
+      ]
+    };
+    if (standards[positions]) {
+      setPayoutStructure(standards[positions]);
+    }
+  };
+
+  const handleConfirmPayout = () => {
+    const total = calculateTotalPayout();
+    if (Math.abs(total - 100) > 0.01) {
+      alert(`Payout percentages must add up to 100%. Current total: ${total.toFixed(1)}%`);
+      return;
+    }
+
+    // Save payout structure and create game
+    const finalConfig = {
+      ...gameConfig,
+      payoutStructure: payoutStructure
+    };
+
+    setShowPrizePoolConfig(false);
+    createGameOnServer(finalConfig.blindStructure, finalConfig.payoutStructure);
+  };
+
+  const handleBackFromPrizePool = () => {
+    setShowPrizePoolConfig(false);
+    setShowCustomBlindBuilder(true); // Go back to last modal
   };
 
   // Generate a standard blind structure
@@ -597,7 +698,7 @@ function GameManagement() {
   };
 
   // Actually create the game on the server
-  const createGameOnServer = async (blindStructure = null) => {
+  const createGameOnServer = async (blindStructure = null, payoutStructure = null) => {
     // Combine date and time for database (without timezone conversion)
     let gameDateTime = null;
     if (gameDate) {
@@ -609,10 +710,14 @@ function GameManagement() {
       }
     }
 
-    // Create config with blind structure if provided
-    const configToSend = blindStructure
-      ? { ...gameConfig, blindStructure }
-      : gameConfig;
+    // Create config with blind structure and payout structure if provided
+    let configToSend = { ...gameConfig };
+    if (blindStructure) {
+      configToSend.blindStructure = blindStructure;
+    }
+    if (payoutStructure) {
+      configToSend.payoutStructure = payoutStructure;
+    }
 
     try {
       const response = await fetch('/api/games', {
@@ -645,6 +750,7 @@ function GameManagement() {
         setShowCustomBlindBuilder(false);
         setShowSaveStructure(false);
         setShowLoadStructure(false);
+        setShowPrizePoolConfig(false);
         setGameName('');
         setGameDate('');
         setGameTime('');
@@ -662,6 +768,11 @@ function GameManagement() {
         setSavedDuration('15');
         setEnableBBAntes(false);
         setStructureName('');
+        setPayoutStructure([
+          { position: 1, percentage: 50 },
+          { position: 2, percentage: 30 },
+          { position: 3, percentage: 20 }
+        ]);
         setGameConfig({
           gameType: '',
           maxPlayers: 10,
@@ -673,9 +784,13 @@ function GameManagement() {
           buyInAmount: '',
           tournamentType: 'Standard',
           enableRebuys: true,
+          enableAddOn: false,
+          addOnCost: '',
+          addOnChips: '',
           autoDeleteAfterDays: 7,
           playerList: [],
           blindStructure: null,
+          payoutStructure: null,
           tournamentStatus: 'Registering'
         });
         fetchGames();
@@ -1588,16 +1703,55 @@ function GameManagement() {
                     </div>
 
                     {(gameConfig.tournamentType === 'Standard' || gameConfig.tournamentType === 'PKO') && (
-                      <div className="config-item">
-                        <label className="checkbox-label">
-                          <input
-                            type="checkbox"
-                            checked={gameConfig.enableRebuys}
-                            onChange={(e) => setGameConfig({ ...gameConfig, enableRebuys: e.target.checked })}
-                          />
-                          <span>Allow Re-buys</span>
-                        </label>
-                      </div>
+                      <>
+                        <div className="config-item">
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={gameConfig.enableRebuys}
+                              onChange={(e) => setGameConfig({ ...gameConfig, enableRebuys: e.target.checked })}
+                            />
+                            <span>Allow Re-buys</span>
+                          </label>
+                        </div>
+
+                        <div className="config-item">
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={gameConfig.enableAddOn}
+                              onChange={(e) => setGameConfig({ ...gameConfig, enableAddOn: e.target.checked })}
+                            />
+                            <span>Enable Add-On</span>
+                          </label>
+                        </div>
+
+                        {gameConfig.enableAddOn && (
+                          <>
+                            <div className="config-item">
+                              <label>Add-On Cost</label>
+                              <input
+                                type="text"
+                                placeholder="e.g., $20"
+                                value={gameConfig.addOnCost}
+                                onChange={(e) => setGameConfig({ ...gameConfig, addOnCost: e.target.value })}
+                                className="game-input"
+                              />
+                            </div>
+
+                            <div className="config-item">
+                              <label>Add-On Chips</label>
+                              <input
+                                type="number"
+                                placeholder="e.g., 5000"
+                                value={gameConfig.addOnChips}
+                                onChange={(e) => setGameConfig({ ...gameConfig, addOnChips: e.target.value })}
+                                className="game-input"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
                   </>
                 )}
@@ -2151,6 +2305,199 @@ function GameManagement() {
               <div className="modal-actions">
                 <button onClick={() => setShowLoadStructure(false)} className="cancel-btn" style={{ width: '100%' }}>
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Prize Pool Configuration Modal */}
+        {showPrizePoolConfig && (
+          <div className="modal-overlay">
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '85vh', overflow: 'auto' }}>
+              <h3>Prize Pool Payout Structure</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Configure how the prize pool will be distributed among winners.
+              </p>
+
+              {/* Reference Table */}
+              <div style={{ marginBottom: '25px', padding: '15px', background: '#f0fdf4', borderRadius: '8px', border: '1px solid #86efac' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#065f46' }}>📊 Standard Payout Structures (Reference)</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ background: '#dcfce7', borderBottom: '2px solid #86efac' }}>
+                      <th style={{ padding: '8px', textAlign: 'left', fontWeight: '600' }}>Players</th>
+                      <th style={{ padding: '8px', textAlign: 'center', fontWeight: '600' }}>1-10</th>
+                      <th style={{ padding: '8px', textAlign: 'center', fontWeight: '600' }}>11-20</th>
+                      <th style={{ padding: '8px', textAlign: 'center', fontWeight: '600' }}>21-30</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #bbf7d0' }}>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>1st</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>50%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>50%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>40%</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #bbf7d0' }}>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>2nd</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>30%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>25%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>25%</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #bbf7d0' }}>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>3rd</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>20%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>15%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>20%</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #bbf7d0' }}>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>4th</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>—</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>10%</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>10%</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '8px', fontWeight: '500' }}>5th</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>—</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>—</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>5%</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button 
+                    onClick={() => handleLoadStandardPayout(3)}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Load 3-Way
+                  </button>
+                  <button 
+                    onClick={() => handleLoadStandardPayout(4)}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Load 4-Way
+                  </button>
+                  <button 
+                    onClick={() => handleLoadStandardPayout(5)}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  >
+                    Load 5-Way
+                  </button>
+                </div>
+              </div>
+
+              {/* Custom Payout Configuration */}
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '1rem', color: '#111827' }}>Your Payout Structure</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {payoutStructure.map((payout) => (
+                    <div 
+                      key={payout.position}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '12px',
+                        background: '#f9fafb',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb'
+                      }}
+                    >
+                      <div style={{ fontWeight: '600', minWidth: '60px', color: '#374151' }}>
+                        {payout.position === 1 ? '🥇' : payout.position === 2 ? '🥈' : payout.position === 3 ? '🥉' : `${payout.position}th`}
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={payout.percentage}
+                        onChange={(e) => handlePayoutPercentageChange(payout.position, e.target.value)}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          fontSize: '1rem',
+                          border: '2px solid #d1d5db',
+                          borderRadius: '6px',
+                          fontWeight: '600'
+                        }}
+                        placeholder="0"
+                      />
+                      <span style={{ fontWeight: '500', color: '#6b7280', minWidth: '30px' }}>%</span>
+                      {payoutStructure.length > 1 && (
+                        <button
+                          onClick={() => handleRemovePayoutPosition(payout.position)}
+                          style={{
+                            padding: '8px 12px',
+                            background: '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <button 
+                  onClick={handleAddPayoutPosition}
+                  style={{
+                    marginTop: '12px',
+                    padding: '10px 20px',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: '500'
+                  }}
+                >
+                  + Add Position
+                </button>
+              </div>
+
+              {/* Total Display */}
+              <div style={{
+                padding: '15px',
+                background: calculateTotalPayout() === 100 ? '#dcfce7' : '#fee2e2',
+                border: `2px solid ${calculateTotalPayout() === 100 ? '#86efac' : '#fca5a5'}`,
+                borderRadius: '8px',
+                marginBottom: '20px',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '4px' }}>Total Payout</div>
+                <div style={{
+                  fontSize: '2rem',
+                  fontWeight: '900',
+                  color: calculateTotalPayout() === 100 ? '#059669' : '#dc2626'
+                }}>
+                  {calculateTotalPayout().toFixed(1)}%
+                </div>
+                {calculateTotalPayout() !== 100 && (
+                  <div style={{ fontSize: '0.85rem', color: '#dc2626', marginTop: '4px' }}>
+                    Must equal 100%
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleBackFromPrizePool} className="cancel-btn">
+                  ← Back
+                </button>
+                <button 
+                  onClick={handleConfirmPayout}
+                  className="confirm-btn"
+                  style={{ flex: 1 }}
+                  disabled={Math.abs(calculateTotalPayout() - 100) > 0.01}
+                >
+                  Create Game
                 </button>
               </div>
             </div>
