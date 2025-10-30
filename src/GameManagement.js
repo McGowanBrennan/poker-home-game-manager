@@ -360,43 +360,62 @@ function GameManagement() {
     setShowSaveStructure(true);
   };
 
-  const handleSaveStructureConfirm = () => {
+  const handleSaveStructureConfirm = async () => {
     if (!structureName.trim()) {
       alert('Please enter a name for this structure');
       return;
     }
 
-    const structure = {
-      name: structureName.trim(),
-      levels: customBlindLevels,
-      enableBBAntes,
-      savedAt: new Date().toISOString()
-    };
+    try {
+      const response = await fetch('/api/blind-structures', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userIdentifier: userEmail,
+          name: structureName.trim(),
+          levels: customBlindLevels,
+          enableBBAntes
+        })
+      });
 
-    // Get existing structures from localStorage
-    const storageKey = `blindStructures_${userEmail}`;
-    const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    
-    // Add new structure
-    existing.push(structure);
-    localStorage.setItem(storageKey, JSON.stringify(existing));
-
-    alert(`Blind structure "${structureName}" saved successfully!`);
-    setShowSaveStructure(false);
-    setStructureName('');
+      if (response.ok) {
+        alert(`Blind structure "${structureName}" saved successfully!`);
+        setShowSaveStructure(false);
+        setStructureName('');
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to save blind structure');
+      }
+    } catch (error) {
+      console.error('Error saving blind structure:', error);
+      alert('Failed to save blind structure. Please try again.');
+    }
   };
 
-  const handleLoadStructure = () => {
-    const storageKey = `blindStructures_${userEmail}`;
-    const structures = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    
-    if (structures.length === 0) {
-      alert('You have no saved blind structures yet');
-      return;
-    }
+  const handleLoadStructure = async () => {
+    try {
+      const response = await fetch(`/api/blind-structures?userIdentifier=${encodeURIComponent(userEmail)}`);
+      
+      if (response.ok) {
+        const structures = await response.json();
+        
+        if (structures.length === 0) {
+          alert('You have no saved blind structures yet');
+          return;
+        }
 
-    setSavedStructures(structures);
-    setShowLoadStructure(true);
+        setSavedStructures(structures);
+        setShowLoadStructure(true);
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to load blind structures');
+      }
+    } catch (error) {
+      console.error('Error loading blind structures:', error);
+      alert('Failed to load blind structures. Please try again.');
+    }
   };
 
   const handleSelectStructure = (structure) => {
@@ -406,19 +425,40 @@ function GameManagement() {
     alert(`Loaded structure: ${structure.name}`);
   };
 
-  const handleDeleteStructure = (index) => {
+  const handleDeleteStructure = async (structureId, index) => {
     if (!window.confirm('Are you sure you want to delete this blind structure?')) {
       return;
     }
 
-    const storageKey = `blindStructures_${userEmail}`;
-    const structures = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    structures.splice(index, 1);
-    localStorage.setItem(storageKey, JSON.stringify(structures));
-    setSavedStructures(structures);
+    try {
+      const response = await fetch(`/api/blind-structures/${structureId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userIdentifier: userEmail
+        })
+      });
 
-    if (structures.length === 0) {
-      setShowLoadStructure(false);
+      if (response.ok) {
+        // Remove from local state
+        const updatedStructures = [...savedStructures];
+        updatedStructures.splice(index, 1);
+        setSavedStructures(updatedStructures);
+
+        if (updatedStructures.length === 0) {
+          setShowLoadStructure(false);
+        }
+        
+        alert('Blind structure deleted successfully');
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to delete blind structure');
+      }
+    } catch (error) {
+      console.error('Error deleting blind structure:', error);
+      alert('Failed to delete blind structure. Please try again.');
     }
   };
 
@@ -2096,7 +2136,7 @@ function GameManagement() {
                           Load
                         </button>
                         <button 
-                          onClick={() => handleDeleteStructure(index)}
+                          onClick={() => handleDeleteStructure(structure.id, index)}
                           className="remove-player-btn"
                           style={{ padding: '8px 12px', fontSize: '0.9rem' }}
                         >

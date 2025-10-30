@@ -270,8 +270,53 @@ function PokerTable() {
     }
   };
 
+  const handleMarkPaid = async (seatId, paid) => {
+    try {
+      const response = await fetch(`/api/games/${gameId}/reservations/${seatId}/paid`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          tableNumber: currentTable,
+          paid: paid
+        })
+      });
+
+      if (response.ok) {
+        // Update local state
+        setReservedSeats(prev => ({
+          ...prev,
+          [seatId]: {
+            ...prev[seatId],
+            paidBuyin: paid
+          }
+        }));
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to update buy-in status');
+      }
+    } catch (error) {
+      console.error('Error marking player as paid:', error);
+      alert('Failed to update buy-in status. Please try again.');
+    }
+  };
+
   // Check if current user is the game creator
   const isCreator = userEmail && gameCreator && userEmail === gameCreator;
+
+  // Calculate prize pool (number of players who have paid * buy-in amount)
+  const calculatePrizePool = () => {
+    if (!gameConfig || gameConfig.gameType !== 'tournament' || !gameConfig.buyInAmount) {
+      return 0;
+    }
+    
+    const buyIn = parseFloat(gameConfig.buyInAmount) || 0;
+    const paidCount = Object.values(reservedSeats).filter(r => r.paidBuyin).length;
+    
+    return buyIn * paidCount;
+  };
 
   const handleRandomizeSeating = async () => {
     if (!window.confirm('Are you sure you want to randomize the seating chart? This will shuffle all players and redistribute them evenly across tables.')) {
@@ -445,7 +490,10 @@ function PokerTable() {
         <div className="poker-table-container">
           <div className="poker-table">
             {players.map((player) => {
-              const isReserved = reservedSeats[player.id];
+              const reservation = reservedSeats[player.id];
+              const isReserved = !!reservation;
+              const playerName = reservation?.playerName || '';
+              const isPaid = reservation?.paidBuyin || false;
               
               const handleButtonClick = () => {
                 if (isReserved && isCreator) {
@@ -461,7 +509,7 @@ function PokerTable() {
                     {isReserved && (
                       <img 
                         src="/player-avatar.png" 
-                        alt={reservedSeats[player.id]}
+                        alt={playerName}
                         className="avatar-image"
                       />
                     )}
@@ -472,8 +520,23 @@ function PokerTable() {
                     disabled={isReserved && !isCreator}
                     title={isReserved && isCreator ? 'Click to remove player' : ''}
                   >
-                    {isReserved ? reservedSeats[player.id] : 'Reserve Seat'}
+                    {isReserved ? playerName : 'Reserve Seat'}
                   </button>
+                  
+                  {/* Buy-in checkbox - only show for game creator during registration */}
+                  {isReserved && isCreator && gameConfig && gameConfig.gameType === 'tournament' && tournamentStatus === 'Registering' && (
+                    <div className="buyin-checkbox-container">
+                      <label className="buyin-checkbox-label">
+                        <input 
+                          type="checkbox"
+                          checked={isPaid}
+                          onChange={(e) => handleMarkPaid(player.id, e.target.checked)}
+                          className="buyin-checkbox"
+                        />
+                        <span className="buyin-checkbox-text">Paid</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -489,6 +552,14 @@ function PokerTable() {
                 >
                   {tournamentStatus}
                 </button>
+                
+                {/* Prize Pool Display - Show during Registering status */}
+                {tournamentStatus === 'Registering' && gameConfig.buyInAmount && (
+                  <div className="prize-pool-display">
+                    <span className="prize-pool-label">Prize Pool:</span>
+                    <span className="prize-pool-amount">${calculatePrizePool()}</span>
+                  </div>
+                )}
               </div>
             )}
 

@@ -3,7 +3,6 @@ const cors = require('cors');
 const crypto = require('crypto');
 const cron = require('node-cron');
 const path = require('path');
-const fs = require('fs').promises;
 const db = require('./db');
 require('dotenv').config();
 
@@ -52,26 +51,8 @@ async function generateUniqueUserCode() {
 }
 
 // Helper function to generate config ID
-function generateConfigId() {
-  return crypto.randomBytes(8).toString('hex');
-}
-
-// Helper functions for game configurations JSON file
-async function readGameConfigs() {
-  try {
-    const data = await fs.readFile('gameConfigurations.json', 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return {};
-    }
-    throw error;
-  }
-}
-
-async function writeGameConfigs(configs) {
-  await fs.writeFile('gameConfigurations.json', JSON.stringify(configs, null, 2));
-}
+// Note: Game configurations are now stored directly in the database as JSONB column
+// No longer need local file operations
 
 // ========== USER ENDPOINTS ==========
 
@@ -204,29 +185,20 @@ app.post('/api/games', async (req, res) => {
     }
 
     const gameId = generateGameCode();
-    let configId = null;
 
-    // Create game configuration if provided
-    if (config && Object.keys(config).length > 0) {
-      console.log('Saving game config:', config);
-      configId = generateConfigId();
+    // Prepare config for database (store as JSONB)
+    const configJson = config && Object.keys(config).length > 0 
+      ? JSON.stringify(config)
+      : null;
       
-      // Save config to gameConfigurations.json with gameId reference
-      const configs = await readGameConfigs();
-      configs[configId] = {
-        gameId: gameId,
-        ...config,
-        createdAt: new Date().toISOString()
-      };
-      console.log('Writing configs to file...');
-      await writeGameConfigs(configs);
-      console.log('Config saved successfully with ID:', configId);
+    if (configJson) {
+      console.log('Saving game config to database');
     }
 
-    // Create game in database
+    // Create game in database with config
     await db.query(
-      'INSERT INTO games (id, name, created_by, game_date_time, note) VALUES ($1, $2, $3, $4::timestamp, $5)',
-      [gameId, name, createdBy, gameDateTime || null, note || null]
+      'INSERT INTO games (id, name, created_by, game_date_time, note, config) VALUES ($1, $2, $3, $4::timestamp, $5, $6)',
+      [gameId, name, createdBy, gameDateTime || null, note || null, configJson]
     );
 
     res.status(201).json({
@@ -237,7 +209,7 @@ app.post('/api/games', async (req, res) => {
         createdBy,
         gameDateTime,
         note,
-        configId,
+        config,
         reservations: {}
       }
     });
@@ -272,22 +244,16 @@ app.get('/api/games', async (req, res) => {
     
     const result = await db.query(query, params);
     
-    // Load configs
-    const configs = await readGameConfigs();
-    
-    // Map games with their configurations by finding config with matching gameId
-    const gamesWithConfigs = result.rows.map(game => {
-      const configEntry = Object.values(configs).find(cfg => cfg.gameId === game.id);
-      return {
-        id: game.id,
-        name: game.name,
-        createdBy: game.created_by,
-        createdAt: game.created_at,
-        gameDateTime: game.game_date_time,
-        note: game.note,
-        config: configEntry || null
-      };
-    });
+    // Map games with their configurations from database
+    const gamesWithConfigs = result.rows.map(game => ({
+      id: game.id,
+      name: game.name,
+      createdBy: game.created_by,
+      createdAt: game.created_at,
+      gameDateTime: game.game_date_time,
+      note: game.note,
+      config: game.config || null  // Config is now stored directly in database as JSONB
+    }));
     
     res.json(gamesWithConfigs);
   } catch (error) {
@@ -312,10 +278,6 @@ app.get('/api/games/:gameId', async (req, res) => {
 
     const game = result.rows[0];
     
-    // Load config if exists by finding config with matching gameId
-    const configs = await readGameConfigs();
-    const config = Object.values(configs).find(cfg => cfg.gameId === gameId) || null;
-    
     res.json({
       id: game.id,
       name: game.name,
@@ -323,7 +285,7 @@ app.get('/api/games/:gameId', async (req, res) => {
       createdAt: game.created_at,
       gameDateTime: game.game_date_time,
       note: game.note,
-      config: config
+      config: game.config || null  // Config is now stored directly in database as JSONB
     });
   } catch (error) {
     console.error('Error fetching game:', error);
@@ -362,21 +324,11 @@ app.delete('/api/games/:gameId', async (req, res) => {
       [gameId]
     );
 
-    // Delete the game
+    // Delete the game (config will be deleted automatically via database)
     await db.query(
       'DELETE FROM games WHERE id = $1',
       [gameId]
     );
-
-    // Clean up game config if it exists
-    const configs = await readGameConfigs();
-    const configId = Object.keys(configs).find(id => configs[id].gameId === gameId);
-    
-    if (configId) {
-      // Remove the config
-      delete configs[configId];
-      await writeGameConfigs(configs);
-    }
 
     res.json({
       success: true,
@@ -399,14 +351,17 @@ app.get('/api/games/:gameId/reservations', async (req, res) => {
     const table = parseInt(tableNumber) || 1;
 
     const result = await db.query(
-      'SELECT seat_id, player_name FROM reservations WHERE game_id = $1 AND table_number = $2',
+      'SELECT seat_id, player_name, paid_buyin FROM reservations WHERE game_id = $1 AND table_number = $2',
       [gameId, table]
     );
 
-    // Convert to object format {seatId: playerName}
+    // Convert to object format {seatId: {playerName, paidBuyin}}
     const reservations = {};
     result.rows.forEach(row => {
-      reservations[row.seat_id] = row.player_name;
+      reservations[row.seat_id] = {
+        playerName: row.player_name,
+        paidBuyin: row.paid_buyin || false
+      };
     });
 
     res.json(reservations);
@@ -522,6 +477,57 @@ app.delete('/api/games/:gameId/reservations/:seatId', async (req, res) => {
   } catch (error) {
     console.error('Error removing reservation:', error);
     res.status(500).json({ error: 'Failed to remove reservation' });
+  }
+});
+
+// Mark player as paid for tournament buy-in
+app.patch('/api/games/:gameId/reservations/:seatId/paid', async (req, res) => {
+  try {
+    const { gameId, seatId } = req.params;
+    const { tableNumber, paid, userEmail } = req.body;
+    const table = parseInt(tableNumber) || 1;
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can mark buy-ins as paid' });
+    }
+
+    // Update the paid status
+    const updateResult = await db.query(
+      'UPDATE reservations SET paid_buyin = $1 WHERE game_id = $2 AND seat_id = $3 AND table_number = $4 RETURNING *',
+      [paid, gameId, parseInt(seatId), table]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    res.json({
+      success: true,
+      message: paid ? 'Player marked as paid' : 'Player marked as unpaid',
+      reservation: {
+        seatId: updateResult.rows[0].seat_id,
+        playerName: updateResult.rows[0].player_name,
+        paidBuyin: updateResult.rows[0].paid_buyin
+      }
+    });
+  } catch (error) {
+    console.error('Error updating buy-in status:', error);
+    res.status(500).json({ error: 'Failed to update buy-in status' });
   }
 });
 
@@ -716,22 +722,17 @@ app.post('/api/games/:gameId/status', async (req, res) => {
       return res.status(403).json({ error: 'Only the game creator can update tournament status' });
     }
 
-    // Update status in game configuration
-    const configs = await readGameConfigs();
-    let configId = null;
-    
-    // Find config by gameId
-    for (const [id, config] of Object.entries(configs)) {
-      if (config.gameId === gameId) {
-        configId = id;
-        break;
-      }
-    }
-
-    if (configId && configs[configId]) {
-      configs[configId].tournamentStatus = status;
-      await writeGameConfigs(configs);
-    }
+    // Update status in game configuration (stored in database)
+    await db.query(
+      `UPDATE games 
+       SET config = jsonb_set(
+         COALESCE(config, '{}'::jsonb), 
+         '{tournamentStatus}', 
+         $1::jsonb
+       )
+       WHERE id = $2`,
+      [JSON.stringify(status), gameId]
+    );
 
     res.json({ 
       success: true,
@@ -980,6 +981,102 @@ app.delete('/api/groups/:groupId/players/:playerId', async (req, res) => {
   } catch (error) {
     console.error('Error removing player:', error);
     res.status(500).json({ error: 'Failed to remove player' });
+  }
+});
+
+// ========== BLIND STRUCTURES ENDPOINTS ==========
+
+// Get all saved blind structures for a user
+app.get('/api/blind-structures', async (req, res) => {
+  try {
+    const { userIdentifier } = req.query;
+    
+    if (!userIdentifier) {
+      return res.status(400).json({ error: 'User identifier required' });
+    }
+    
+    const result = await db.query(
+      'SELECT * FROM saved_blind_structures WHERE user_identifier = $1 ORDER BY created_at DESC',
+      [userIdentifier]
+    );
+    
+    const structures = result.rows.map(row => ({
+      id: row.id,
+      name: row.structure_name,
+      levels: row.blind_levels,
+      enableBBAntes: row.enable_bb_antes,
+      savedAt: row.created_at
+    }));
+    
+    res.json(structures);
+  } catch (error) {
+    console.error('Error fetching blind structures:', error);
+    res.status(500).json({ error: 'Failed to fetch blind structures' });
+  }
+});
+
+// Save a new blind structure
+app.post('/api/blind-structures', async (req, res) => {
+  try {
+    const { userIdentifier, name, levels, enableBBAntes } = req.body;
+    
+    if (!userIdentifier || !name || !levels) {
+      return res.status(400).json({ error: 'User identifier, name, and levels are required' });
+    }
+    
+    const result = await db.query(
+      `INSERT INTO saved_blind_structures (user_identifier, structure_name, blind_levels, enable_bb_antes)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [userIdentifier, name, JSON.stringify(levels), enableBBAntes || false]
+    );
+    
+    const structure = {
+      id: result.rows[0].id,
+      name: result.rows[0].structure_name,
+      levels: result.rows[0].blind_levels,
+      enableBBAntes: result.rows[0].enable_bb_antes,
+      savedAt: result.rows[0].created_at
+    };
+    
+    res.status(201).json({
+      message: 'Blind structure saved successfully',
+      structure
+    });
+  } catch (error) {
+    if (error.code === '23505') { // Unique constraint violation
+      return res.status(400).json({ error: 'A structure with this name already exists' });
+    }
+    console.error('Error saving blind structure:', error);
+    res.status(500).json({ error: 'Failed to save blind structure' });
+  }
+});
+
+// Delete a blind structure
+app.delete('/api/blind-structures/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userIdentifier } = req.body;
+    
+    if (!userIdentifier) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+    
+    const result = await db.query(
+      'DELETE FROM saved_blind_structures WHERE id = $1 AND user_identifier = $2 RETURNING *',
+      [id, userIdentifier]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Blind structure not found' });
+    }
+    
+    res.json({
+      message: 'Blind structure deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting blind structure:', error);
+    res.status(500).json({ error: 'Failed to delete blind structure' });
   }
 });
 
