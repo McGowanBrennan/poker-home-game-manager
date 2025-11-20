@@ -470,9 +470,6 @@ function PokerTable() {
     }
   };
 
-  // Check if current user is the game creator
-  const isCreator = userEmail && gameCreator && userEmail === gameCreator;
-
   // Calculate prize pool (sum of all buy-ins across all players on all tables)
   // For tournaments: prize pool
   // For cash games: total buy-ins on table
@@ -1197,7 +1194,6 @@ function PokerTable() {
                 {buyInPopupPlayer.playerName}
               </h3>
               
-<<<<<<< HEAD
               {/* Cash Game: Manual Buy-In Amount Entry */}
               {buyInPopupPlayer.isCashGame ? (
                 <div style={{ marginBottom: '30px' }}>
