@@ -33,6 +33,12 @@ function GameManagement() {
   const [tournamentPlayerInput, setTournamentPlayerInput] = useState('');
   const [userCode, setUserCode] = useState('');
   
+  // Cash game player list state
+  const [showCashPlayerListQuestion, setShowCashPlayerListQuestion] = useState(false);
+  const [showCashPlayerSelection, setShowCashPlayerSelection] = useState(false);
+  const [cashPlayers, setCashPlayers] = useState([]);
+  const [cashPlayerInput, setCashPlayerInput] = useState('');
+  
   // Blind structure state
   const [showBlindStructureQuestion, setShowBlindStructureQuestion] = useState(false);
   const [showBlindStructureBuilder, setShowBlindStructureBuilder] = useState(false);
@@ -206,6 +212,72 @@ function GameManagement() {
     setGameConfig({ ...gameConfig, gameType: '' });
   };
 
+  // Cash game flow handlers
+  const handleCashGameClick = () => {
+    setShowGameConfig(false);
+    setShowCashPlayerListQuestion(true);
+  };
+  
+  const handleCashPlayerListReady = () => {
+    setShowCashPlayerListQuestion(false);
+    setShowCashPlayerSelection(true);
+  };
+  
+  const handleCashPlayerListNotReady = () => {
+    setShowCashPlayerListQuestion(false);
+    setShowGameConfig(true);
+    setGameConfig({ ...gameConfig, gameType: 'cash', playerList: [] });
+  };
+  
+  const handleBackFromCashPlayerListQuestion = () => {
+    setShowCashPlayerListQuestion(false);
+    setShowGameConfig(true);
+    setGameConfig({ ...gameConfig, gameType: '' });
+  };
+  
+  const handleAddCashPlayer = () => {
+    if (!cashPlayerInput.trim()) {
+      alert('Please enter a player name');
+      return;
+    }
+    
+    if (cashPlayers.some(p => p.toLowerCase() === cashPlayerInput.trim().toLowerCase())) {
+      alert('This player is already in the list');
+      return;
+    }
+
+    setCashPlayers([...cashPlayers, cashPlayerInput.trim()]);
+    setCashPlayerInput('');
+  };
+  
+  const handleRemoveCashPlayer = (playerName) => {
+    setCashPlayers(cashPlayers.filter(p => p !== playerName));
+  };
+  
+  const handleCashPlayerSelectionComplete = () => {
+    if (cashPlayers.length === 0) {
+      alert('Please add at least one player');
+      return;
+    }
+    
+    const playersPerTable = gameConfig.playersPerTable || 10;
+    const calculatedTables = Math.ceil(cashPlayers.length / playersPerTable);
+    
+    setShowCashPlayerSelection(false);
+    setShowGameConfig(true);
+    setGameConfig({ 
+      ...gameConfig, 
+      gameType: 'cash', 
+      playerList: cashPlayers,
+      numberOfTables: calculatedTables
+    });
+  };
+  
+  const handleBackFromCashPlayerSelection = () => {
+    setShowCashPlayerSelection(false);
+    setShowCashPlayerListQuestion(true);
+  };
+
   const handleExitTournamentFlow = () => {
     setShowPlayerListQuestion(false);
     setShowPlayerSelection(false);
@@ -216,8 +288,12 @@ function GameManagement() {
     setShowSaveStructure(false);
     setShowLoadStructure(false);
     setShowPrizePoolConfig(false);
+    setShowCashPlayerListQuestion(false);
+    setShowCashPlayerSelection(false);
     setTournamentPlayers([]);
     setTournamentPlayerInput('');
+    setCashPlayers([]);
+    setCashPlayerInput('');
     setChipSet('standard');
     setBlindDuration(15);
     setCustomBlindLevels([]);
@@ -751,12 +827,16 @@ function GameManagement() {
         setShowSaveStructure(false);
         setShowLoadStructure(false);
         setShowPrizePoolConfig(false);
+        setShowCashPlayerListQuestion(false);
+        setShowCashPlayerSelection(false);
         setGameName('');
         setGameDate('');
         setGameTime('');
         setGameNote('');
         setTournamentPlayers([]);
         setTournamentPlayerInput('');
+        setCashPlayers([]);
+        setCashPlayerInput('');
         setChipSet('standard');
         setBlindDuration(15);
         setCustomBlindLevels([]);
@@ -1459,7 +1539,7 @@ function GameManagement() {
                 {!gameConfig.gameType && (
                   <div className="game-type-selection">
                     <button
-                      onClick={() => setGameConfig({ ...gameConfig, gameType: 'cash' })}
+                      onClick={handleCashGameClick}
                       className="game-type-btn"
                     >
                       <span className="game-type-icon">💵</span>
@@ -1490,45 +1570,108 @@ function GameManagement() {
                       </button>
                     </div>
 
-                    <div className="config-item">
-                      <label>Maximum Players</label>
-                      <input
-                        type="number"
-                        min="2"
-                        max="20"
-                        value={gameConfig.maxPlayers}
-                        onChange={(e) => {
-                          const value = e.target.value === '' ? '' : parseInt(e.target.value);
-                          setGameConfig({ ...gameConfig, maxPlayers: value });
-                        }}
-                        onBlur={(e) => {
-                          if (e.target.value === '' || parseInt(e.target.value) < 2) {
-                            setGameConfig({ ...gameConfig, maxPlayers: 10 });
-                          }
-                        }}
-                        className="game-input"
-                      />
-                    </div>
+                    {/* Player list vs No player list configuration */}
+                    {gameConfig.playerList && gameConfig.playerList.length > 0 ? (
+                      <>
+                        <div className="config-item">
+                          <label>Total Players: {gameConfig.playerList.length}</label>
+                          <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '5px 0 0 0' }}>
+                            {gameConfig.playerList.join(', ')}
+                          </p>
+                          <button
+                            onClick={() => {
+                              setCashPlayers([...gameConfig.playerList]);
+                              setShowGameConfig(false);
+                              setShowCashPlayerSelection(true);
+                            }}
+                            className="secondary-btn"
+                            style={{ marginTop: '10px', fontSize: '0.9rem', padding: '8px 16px' }}
+                          >
+                            Edit Players
+                          </button>
+                        </div>
 
-                    <div className="config-item">
-                      <label>Number of Tables</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={gameConfig.numberOfTables}
-                        onChange={(e) => {
-                          const value = e.target.value === '' ? '' : parseInt(e.target.value);
-                          setGameConfig({ ...gameConfig, numberOfTables: value });
-                        }}
-                        onBlur={(e) => {
-                          if (e.target.value === '' || parseInt(e.target.value) < 1) {
-                            setGameConfig({ ...gameConfig, numberOfTables: 1 });
-                          }
-                        }}
-                        className="game-input"
-                      />
-                    </div>
+                        <div className="config-item">
+                          <label>Players Per Table</label>
+                          <input
+                            type="number"
+                            min="2"
+                            max="20"
+                            value={gameConfig.playersPerTable}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              const playersPerTable = value || 10;
+                              const calculatedTables = Math.ceil(gameConfig.playerList.length / playersPerTable);
+                              setGameConfig({ ...gameConfig, playersPerTable: value, numberOfTables: calculatedTables });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 2) {
+                                const playersPerTable = 10;
+                                const calculatedTables = Math.ceil(gameConfig.playerList.length / playersPerTable);
+                                setGameConfig({ ...gameConfig, playersPerTable, numberOfTables: calculatedTables });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+
+                        <div className="config-item">
+                          <label>Number of Tables (Auto-calculated)</label>
+                          <input
+                            type="number"
+                            value={gameConfig.numberOfTables}
+                            disabled
+                            className="game-input"
+                            style={{ background: '#f3f4f6', cursor: 'not-allowed' }}
+                          />
+                          <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '5px 0 0 0' }}>
+                            Based on {gameConfig.playerList.length} players at {gameConfig.playersPerTable} per table
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="config-item">
+                          <label>Maximum Players</label>
+                          <input
+                            type="number"
+                            min="2"
+                            max="20"
+                            value={gameConfig.maxPlayers}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              setGameConfig({ ...gameConfig, maxPlayers: value });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 2) {
+                                setGameConfig({ ...gameConfig, maxPlayers: 10 });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+
+                        <div className="config-item">
+                          <label>Number of Tables</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            value={gameConfig.numberOfTables}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                              setGameConfig({ ...gameConfig, numberOfTables: value });
+                            }}
+                            onBlur={(e) => {
+                              if (e.target.value === '' || parseInt(e.target.value) < 1) {
+                                setGameConfig({ ...gameConfig, numberOfTables: 1 });
+                              }
+                            }}
+                            className="game-input"
+                          />
+                        </div>
+                      </>
+                    )}
 
                     <div className="config-item">
                       <label>Game Type</label>
@@ -1877,6 +2020,121 @@ function GameManagement() {
                 >
                   Continue ({tournamentPlayers.length} players)
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cash Game Player List Question Modal */}
+        {showCashPlayerListQuestion && (
+          <div className="modal-overlay">
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Cash Game Player List</h3>
+              <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '0.95rem' }}>
+                Do you already have your player list ready?
+              </p>
+              
+              <div className="player-list-options">
+                <button onClick={handleCashPlayerListReady} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>✅</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>I have my player list</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Add players to the cash game</span>
+                </button>
+                <button onClick={handleCashPlayerListNotReady} className="player-list-option-btn">
+                  <span style={{ fontSize: '2rem', marginBottom: '10px' }}>📋</span>
+                  <span style={{ fontWeight: '600', marginBottom: '5px' }}>Player list not finalized</span>
+                  <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>Players can join later</span>
+                </button>
+              </div>
+
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
+                <button onClick={handleBackFromCashPlayerListQuestion} className="cancel-btn">
+                  ← Back
+                </button>
+                <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cash Game Player Selection Modal */}
+        {showCashPlayerSelection && (
+          <div className="modal-overlay">
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
+              <h3>Add Cash Game Players</h3>
+              <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
+                Enter the names of players who will participate in this cash game ({cashPlayers.length} added)
+              </p>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    type="text"
+                    placeholder="Enter player name"
+                    className="player-input tournament-player-input"
+                    value={cashPlayerInput}
+                    onChange={(e) => setCashPlayerInput(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        handleAddCashPlayer();
+                      }
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <button 
+                    onClick={handleAddCashPlayer}
+                    className="save-player-btn"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    Add Player
+                  </button>
+                </div>
+              </div>
+
+              {cashPlayers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280', background: '#f9fafb', borderRadius: '8px' }}>
+                  <p>No players added yet</p>
+                </div>
+              ) : (
+                <div className="tournament-players-list">
+                  {cashPlayers.map((playerName, index) => (
+                    <div key={index} className="tournament-player-item">
+                      <div className="tournament-player-info">
+                        <span className="player-number">{index + 1}.</span>
+                        <span className="player-name">{playerName}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleRemoveCashPlayer(playerName)}
+                        className="remove-player-btn"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+                <button 
+                  onClick={handleBackFromCashPlayerSelection} 
+                  className="cancel-btn"
+                >
+                  ← Back
+                </button>
+                <div style={{ display: 'flex', gap: '10px', flex: 1, justifyContent: 'flex-end' }}>
+                  <button 
+                    onClick={handleCashPlayerSelectionComplete} 
+                    className="confirm-btn"
+                    disabled={cashPlayers.length === 0}
+                  >
+                    Continue ({cashPlayers.length} players) →
+                  </button>
+                  <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
