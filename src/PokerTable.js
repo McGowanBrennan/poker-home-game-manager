@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useTournamentTimer } from './hooks/useTournamentTimer';
 import './App.css';
 
 function PokerTable() {
@@ -7,6 +8,7 @@ function PokerTable() {
   const navigate = useNavigate();
   const location = useLocation();
   const [reservedSeats, setReservedSeats] = useState({});
+  const [allReservations, setAllReservations] = useState({}); // All reservations across all tables for prize pool calculation
   const [gameName, setGameName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userCode, setUserCode] = useState('');
@@ -24,6 +26,22 @@ function PokerTable() {
   const [buyInPopupPlayer, setBuyInPopupPlayer] = useState(null); // {seatId, playerName, buyInCount, owedAmount, isCashGame}
   const [cashBuyInAmount, setCashBuyInAmount] = useState(''); // Manual buy-in amount for cash games
   const [showPayoutStructure, setShowPayoutStructure] = useState(false);
+  const [showResultsModal, setShowResultsModal] = useState(false);
+  const [tournamentResults, setTournamentResults] = useState([]); // Array of {position, playerName, amount}
+  
+  // Calculate if current user is game creator
+  const isCreator = userEmail && gameCreator && userEmail === gameCreator;
+  
+  // Tournament timer hook
+  const timer = useTournamentTimer({
+    gameId,
+    gameConfig,
+    tournamentStatus,
+    isCreator,
+    userEmail
+  });
+  
+  const pollingIntervalRef = useRef(null); // Track polling interval to adjust dynamically
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -37,7 +55,7 @@ function PokerTable() {
   ];
 
   // Fetch game details and reservations from server
-  const fetchGameData = async () => {
+  const fetchGameData = async (skipTimerSync = false) => {
     try {
       // Fetch game details
       const gameResponse = await fetch(`/api/games/${gameId}`);
@@ -55,6 +73,22 @@ function PokerTable() {
       
       if (gameResponse.ok) {
         const gameData = await gameResponse.json();
+        
+        console.log('📥 Full game data received:', {
+          currentBlindLevel: gameData.currentBlindLevel,
+          timeRemainingSeconds: gameData.timeRemainingSeconds,
+          timerRunning: gameData.timerRunning,
+          timerPaused: gameData.timerPaused,
+          timerLastUpdate: gameData.timerLastUpdate,
+          hasBlindStructure: !!gameData.config?.blindStructure
+        });
+        
+        // Load timer state FIRST (before state updates that trigger initialization effect)
+        // This ensures timer state is loaded before the initialization effect runs
+        if (!skipTimerSync) {
+          timer.loadTimerStateFromData(gameData);
+        }
+
         setGameName(gameData.name);
         setGameCreator(gameData.createdBy);
         setGameDateTime(gameData.gameDateTime);
@@ -65,18 +99,98 @@ function PokerTable() {
         if (gameData.config && gameData.config.tournamentStatus) {
           setTournamentStatus(gameData.config.tournamentStatus);
         }
-      }
 
-      // Fetch reservations for this game and current table
-      const reservationsResponse = await fetch(`/api/games/${gameId}/reservations?tableNumber=${currentTable}`);
+        // Load tournament results if available
+        if (gameData.config && gameData.config.tournamentResults) {
+          setTournamentResults(gameData.config.tournamentResults);
+        }
+
+        // Fetch reservations for this game and current table
+        const reservationsResponse = await fetch(`/api/games/${gameId}/reservations?tableNumber=${currentTable}`);
+        let reservationsData = {};
       if (reservationsResponse.ok) {
-        const reservationsData = await reservationsResponse.json();
+          reservationsData = await reservationsResponse.json();
         setReservedSeats(reservationsData);
+        }
+
+        // Fetch ALL reservations across all tables for prize pool calculation
+        // Use gameData.config directly (not gameConfig state) since state updates are async
+        if (gameData.config?.gameType === 'tournament') {
+          const numberOfTables = gameData.config.numberOfTables || 1; // Default to 1 if not set
+          console.log('🏆 Fetching all reservations for tournament with', numberOfTables, 'table(s)');
+          
+          const allReservationsPromises = [];
+          for (let table = 1; table <= numberOfTables; table++) {
+            allReservationsPromises.push(
+              fetch(`/api/games/${gameId}/reservations?tableNumber=${table}`)
+                .then(res => {
+                  if (res.ok) {
+                    return res.json();
+                  }
+                  console.warn(`⚠️ Failed to fetch reservations for table ${table}`);
+                  return {};
+                })
+                .catch(error => {
+                  console.error(`❌ Error fetching table ${table}:`, error);
+                  return {};
+                })
+            );
+          }
+          
+          Promise.all(allReservationsPromises).then(allTablesData => {
+            console.log('📊 Fetched reservations from all tables:', allTablesData);
+            
+            // Combine all tables' reservations into one object
+            const combined = {};
+            allTablesData.forEach((tableData, index) => {
+              console.log(`  Table ${index + 1} has ${Object.keys(tableData).length} reservations`);
+              Object.keys(tableData).forEach(seatId => {
+                // Use unique key combining table and seat to avoid conflicts
+                // For single table, keys will be: table1_seat1, table1_seat2, etc.
+                const uniqueKey = numberOfTables > 1 ? `table${index + 1}_seat${seatId}` : seatId;
+                combined[uniqueKey] = tableData[seatId];
+              });
+            });
+            
+            console.log('💰 Combined all reservations for prize pool:', combined, 'Total keys:', Object.keys(combined).length);
+            setAllReservations(combined);
+          }).catch(error => {
+            console.error('❌ Error in Promise.all for all reservations:', error);
+            // Fallback: use current table's reservations if we have them
+            console.log('🔄 Using fallback: current table reservations');
+            setAllReservations(reservationsData || {});
+          });
+        } else {
+          // For non-tournament games, just use current table's reservations
+          console.log('💰 Non-tournament game, using current table reservations for allReservations');
+          setAllReservations(reservationsData || {});
+        }
       }
     } catch (error) {
       console.error('Error fetching game data:', error);
     }
   };
+
+  // Update polling interval when tournament status or timer pause state changes
+  useEffect(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      
+      // If timer is paused, stop frequent polling (timer not changing)
+      const skipTimerSync = tournamentStatus !== 'In Progress' || timer.timerPaused;
+      let interval = timer.getPollInterval(tournamentStatus);
+      
+      // When paused during "In Progress", use longer interval (30 seconds) since timer isn't changing
+      if (tournamentStatus === 'In Progress' && timer.timerPaused) {
+        interval = 30000; // 30 seconds when paused
+      }
+      
+      pollingIntervalRef.current = setInterval(() => {
+        fetchGameData(skipTimerSync);
+      }, interval);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournamentStatus, timer.timerPaused]);
 
   // Load game data on mount and poll for updates
   useEffect(() => {
@@ -101,12 +215,28 @@ function PokerTable() {
 
     fetchGameData();
     
-    // Poll for updates every 2 seconds
-    const interval = setInterval(fetchGameData, 2000);
+    // Start polling based on tournament status and timer pause state
+    const skipTimerSync = tournamentStatus !== 'In Progress' || timer.timerPaused;
+    let interval = timer.getPollInterval(tournamentStatus);
     
-    return () => clearInterval(interval);
+    // When paused during "In Progress", use longer interval since timer isn't changing
+    if (tournamentStatus === 'In Progress' && timer.timerPaused) {
+      interval = 30000; // 30 seconds when paused
+    }
+    
+    pollingIntervalRef.current = setInterval(() => {
+      fetchGameData(skipTimerSync);
+    }, interval);
+    
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, currentTable]);
+
 
   const handleReserveSeat = async (seatId) => {
     // Check if seat is already reserved
@@ -153,6 +283,8 @@ function PokerTable() {
       if (response.ok) {
         const data = await response.json();
         setReservedSeats(data.reservations);
+        // Immediately refresh all data to sync across tables and update prize pool
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to reserve seat');
@@ -263,6 +395,8 @@ function PokerTable() {
       if (response.ok) {
         const data = await response.json();
         setReservedSeats(data.reservations);
+        // Immediately refresh all data to sync across tables and update prize pool
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to remove reservation');
@@ -307,8 +441,25 @@ function PokerTable() {
             addOnPurchased: data.reservation.addOnPurchased
           }
         }));
-        // Refresh game data to update totals
-        fetchGameData();
+        
+        // Also update allReservations for accurate prize pool calculation
+        const numberOfTables = gameConfig?.numberOfTables || 1;
+        const uniqueKey = numberOfTables > 1 ? `table${currentTable}_seat${seatId}` : seatId;
+        
+        setAllReservations(prev => ({
+          ...prev,
+          [uniqueKey]: {
+            ...prev[uniqueKey],
+            playerName: prev[uniqueKey]?.playerName || data.reservation.playerName,
+            owedAmount: data.reservation.owedAmount,
+            addOnPurchased: data.reservation.addOnPurchased
+          }
+        }));
+        
+        console.log('🔄 Updated allReservations for prize pool:', uniqueKey, 'Amount:', data.reservation.owedAmount);
+        
+        // Immediately refresh all reservations to ensure prize pool is accurate across all tables
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to update buy-in count');
@@ -322,7 +473,7 @@ function PokerTable() {
   // Check if current user is the game creator
   const isCreator = userEmail && gameCreator && userEmail === gameCreator;
 
-  // Calculate prize pool (sum of all buy-ins across all players)
+  // Calculate prize pool (sum of all buy-ins across all players on all tables)
   // For tournaments: prize pool
   // For cash games: total buy-ins on table
   const calculatePrizePool = () => {
@@ -330,11 +481,26 @@ function PokerTable() {
       return 0;
     }
     
-    // Sum up all owed amounts (which represents total buy-ins)
-    const total = Object.values(reservedSeats).reduce((sum, reservation) => {
-      return sum + (parseFloat(reservation.owedAmount) || 0);
+    // For cash games, use current table reservations
+    // For tournaments, use allReservations to include all tables
+    if (gameConfig.gameType === 'cash') {
+      const total = Object.values(reservedSeats).reduce((sum, reservation) => {
+        return sum + (parseFloat(reservation?.owedAmount) || 0);
+      }, 0);
+      return total;
+    }
+    
+    // Sum up all owed amounts across ALL tables (not just current table) for tournaments
+    const reservationsArray = Object.values(allReservations);
+    console.log('🏆 Calculating prize pool from', reservationsArray.length, 'reservations:', allReservations);
+    
+    const total = reservationsArray.reduce((sum, reservation) => {
+      const amount = parseFloat(reservation?.owedAmount) || 0;
+      console.log('  - Reservation:', reservation, 'Amount:', amount);
+      return sum + amount;
     }, 0);
     
+    console.log('💰 Total prize pool calculated:', total);
     return total;
   };
 
@@ -351,6 +517,8 @@ function PokerTable() {
       amount: (prizePool * payout.percentage) / 100
     }));
   };
+
+  // Format time remaining as MM:SS
 
   const handleRandomizeSeating = async () => {
     if (!window.confirm('Are you sure you want to randomize the seating chart? This will shuffle all players and redistribute them evenly across tables.')) {
@@ -385,11 +553,32 @@ function PokerTable() {
   };
 
   const handleUpdateTournamentStatus = async () => {
+    // Prevent status changes from "Finished"
+    if (tournamentStatus === 'Finished') {
+      alert('Tournament is finished and cannot be changed to another status.');
+      return;
+    }
+
     const statuses = ['Registering', 'In Progress', 'Finished'];
     const currentIndex = statuses.indexOf(tournamentStatus);
     const nextIndex = (currentIndex + 1) % statuses.length;
     const newStatus = statuses[nextIndex];
 
+    // If changing to "Finished", show results entry modal instead of immediately updating
+    if (newStatus === 'Finished' && tournamentStatus === 'In Progress') {
+      // Initialize results array with payout structure
+      const payouts = calculatePayouts();
+      const initialResults = payouts.map(payout => ({
+        position: payout.position,
+        playerName: '',
+        amount: payout.amount
+      }));
+      setTournamentResults(initialResults);
+      setShowResultsModal(true);
+      return;
+    }
+
+    // For other status changes, update immediately
     try {
       const response = await fetch(`/api/games/${gameId}/status`, {
         method: 'POST',
@@ -404,6 +593,9 @@ function PokerTable() {
 
       if (response.ok) {
         setTournamentStatus(newStatus);
+        // Immediately fetch latest game state; if moving to In Progress, do a full timer sync
+        const skipTimerSync = newStatus !== 'In Progress';
+        fetchGameData(skipTimerSync);
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to update tournament status');
@@ -412,6 +604,77 @@ function PokerTable() {
       console.error('Error updating tournament status:', error);
       alert('Failed to update tournament status. Please try again.');
     }
+  };
+
+  const handleSaveResults = async () => {
+    // Validate that all positions have player names
+    const emptyPositions = tournamentResults.filter(r => !r.playerName || r.playerName.trim() === '');
+    if (emptyPositions.length > 0) {
+      alert('Please select players for all paid positions.');
+      return;
+    }
+
+    try {
+      // First save the results
+      const resultsResponse = await fetch(`/api/games/${gameId}/results`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          results: tournamentResults
+        })
+      });
+
+      if (!resultsResponse.ok) {
+        const error = await resultsResponse.json();
+        console.error('Error saving results:', error);
+        alert(error.error || error.details || 'Failed to save tournament results');
+        return;
+      }
+
+      // Then update status to "Finished"
+      const statusResponse = await fetch(`/api/games/${gameId}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          status: 'Finished'
+        })
+      });
+
+      if (statusResponse.ok) {
+        setTournamentStatus('Finished');
+        setShowResultsModal(false);
+        // Navigate to dashboard after saving results
+        navigate('/dashboard', { state: { userEmail, userCode } });
+      } else {
+        const error = await statusResponse.json();
+        alert(error.error || 'Failed to update tournament status');
+      }
+    } catch (error) {
+      console.error('Error saving tournament results:', error);
+      alert(`Failed to save tournament results: ${error.message || 'Unknown error'}. Please check the console for details.`);
+    }
+  };
+
+  // Get unique player names from all reservations
+  const getTournamentPlayers = () => {
+    const playersSet = new Set();
+    Object.values(allReservations).forEach(reservation => {
+      if (reservation?.playerName) {
+        playersSet.add(reservation.playerName);
+      }
+    });
+    return Array.from(playersSet).sort();
+  };
+
+  const handleCancelResults = () => {
+    setShowResultsModal(false);
+    setTournamentResults([]);
   };
 
   const handleOpenEditDetails = () => {
@@ -489,12 +752,12 @@ function PokerTable() {
           <div className="header-row">
             <button onClick={handleBackToDashboard} className="minimal-btn back-btn" title={userEmail ? 'Back to Dashboard' : 'Return to Home'}>
               ← Back
-            </button>
+          </button>
             <div className="header-center">
               <h2 className="game-title-minimal">{gameName || 'Poker Game'}</h2>
               <button onClick={handleCopyGameLink} className="game-code-minimal" title="Click to copy invite link">
                 {gameId}
-              </button>
+          </button>
               {gameDateTime && (
                 <div className="header-datetime" onClick={isCreator ? handleOpenEditDetails : undefined} style={{ cursor: isCreator ? 'pointer' : 'default' }} title={isCreator ? 'Click to edit' : ''}>
                   📅 {formatGameDateTime(gameDateTime)}
@@ -546,8 +809,8 @@ function PokerTable() {
               
               const handleButtonClick = () => {
                 if (isReserved && isCreator) {
-                  // Open buy-in popup for tournaments during registration or cash games
-                  if ((gameConfig?.gameType === 'tournament' && tournamentStatus === 'Registering') || 
+                  // Open buy-in popup for tournaments (allow updates during Registering and In Progress) or cash games
+                  if ((gameConfig?.gameType === 'tournament' && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress')) || 
                       gameConfig?.gameType === 'cash') {
                     setBuyInPopupPlayer({
                       seatId: player.id,
@@ -577,11 +840,11 @@ function PokerTable() {
                   >
                     {isReserved && (
                       <>
-                        <img 
-                          src="/player-avatar.png" 
+                      <img 
+                        src="/player-avatar.png" 
                           alt={playerName}
-                          className="avatar-image"
-                        />
+                        className="avatar-image"
+                      />
                         {hasTotal && (
                           <div className="avatar-hover-amount">
                             <div className="hover-amount-value">${owedAmount.toFixed(2)}</div>
@@ -611,16 +874,16 @@ function PokerTable() {
             {gameConfig && gameConfig.gameType === 'tournament' && (
               <div className="tournament-status-container">
                 <button
-                  className={`tournament-status-btn ${isCreator ? 'clickable' : ''}`}
-                  onClick={isCreator ? handleUpdateTournamentStatus : undefined}
-                  disabled={!isCreator}
-                  title={isCreator ? 'Click to change status' : ''}
+                  className={`tournament-status-btn ${isCreator && tournamentStatus !== 'Finished' ? 'clickable' : ''}`}
+                  onClick={isCreator && tournamentStatus !== 'Finished' ? handleUpdateTournamentStatus : undefined}
+                  disabled={!isCreator || tournamentStatus === 'Finished'}
+                  title={tournamentStatus === 'Finished' ? 'Tournament is finished' : (isCreator ? 'Click to change status' : '')}
                 >
                   {tournamentStatus}
                 </button>
                 
-                {/* Prize Pool Display - Show during Registering status */}
-                {tournamentStatus === 'Registering' && gameConfig.buyInAmount && (
+                {/* Prize Pool Display - Show during Registering, In Progress, and Finished */}
+                {gameConfig.buyInAmount && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress' || tournamentStatus === 'Finished') && (
                   <div 
                     className="prize-pool-display clickable"
                     onClick={() => gameConfig?.payoutStructure && setShowPayoutStructure(true)}
@@ -629,6 +892,51 @@ function PokerTable() {
                   >
                     <span className="prize-pool-label">Prize Pool:</span>
                     <span className="prize-pool-amount">${calculatePrizePool().toFixed(2)}</span>
+                  </div>
+                )}
+
+                {/* Blind Timer Display - Show during In Progress status */}
+                {tournamentStatus === 'In Progress' && timer.getCurrentBlindLevel() && (
+                  <div className="blind-timer-display">
+                    <div className="blind-timer-header">
+                      <span className="blind-timer-level">
+                        Level {timer.currentBlindLevel + 1}
+                        {timer.getCurrentBlindLevel().isBreak && ' - BREAK'}
+                        {timer.timerPaused && ' - PAUSED'}
+                      </span>
+                      <div className="blind-timer-controls">
+                        <span className="blind-timer-countdown" style={{ opacity: timer.timerPaused ? 0.6 : 1 }}>
+                          {timer.formatTime(timer.timeRemaining)}
+                        </span>
+                        {isCreator && (
+                          <button 
+                            className="timer-pause-btn"
+                            onClick={timer.togglePause}
+                            title={timer.timerPaused ? 'Resume timer' : 'Pause timer'}
+                          >
+                            {timer.timerPaused ? '▶' : '⏸'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {!timer.getCurrentBlindLevel().isBreak && (
+                      <div className="blind-timer-info">
+                        <div className="blind-info-item">
+                          <span className="blind-info-label">SB</span>
+                          <span className="blind-info-value">{timer.getCurrentBlindLevel().smallBlind?.toLocaleString() || '-'}</span>
+                        </div>
+                        <div className="blind-info-item">
+                          <span className="blind-info-label">BB</span>
+                          <span className="blind-info-value">{timer.getCurrentBlindLevel().bigBlind?.toLocaleString() || '-'}</span>
+                        </div>
+                        {timer.getCurrentBlindLevel().bbAnte && (
+                          <div className="blind-info-item">
+                            <span className="blind-info-label">Ante</span>
+                            <span className="blind-info-value">{timer.getCurrentBlindLevel().bbAnte?.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -870,8 +1178,8 @@ function PokerTable() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
+              </div>
+            )}
 
         {/* Buy-In Management Popup */}
         {buyInPopupPlayer && (
@@ -889,6 +1197,7 @@ function PokerTable() {
                 {buyInPopupPlayer.playerName}
               </h3>
               
+<<<<<<< HEAD
               {/* Cash Game: Manual Buy-In Amount Entry */}
               {buyInPopupPlayer.isCashGame ? (
                 <div style={{ marginBottom: '30px' }}>
@@ -1140,6 +1449,196 @@ function PokerTable() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tournament Results Entry Modal */}
+        {showResultsModal && (
+          <div className="modal-overlay" onClick={handleCancelResults}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <button 
+                className="modal-close" 
+                onClick={handleCancelResults}
+                style={{ position: 'absolute', top: '10px', right: '10px' }}
+              >
+                ×
+              </button>
+              
+              <h3 style={{ margin: '0 0 20px 0', fontSize: '1.5rem', color: '#1f2937' }}>
+                🏆 Enter Tournament Results
+              </h3>
+              
+              <div style={{ 
+                padding: '15px', 
+                background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', 
+                borderRadius: '10px',
+                border: '2px solid #86efac',
+                marginBottom: '20px',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '4px' }}>Total Prize Pool</div>
+                <div style={{ fontSize: '2rem', fontWeight: '900', color: '#059669' }}>
+                  ${calculatePrizePool().toFixed(2)}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#374151' }}>
+                  Enter Player Names for Each Position
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {tournamentResults.map((result, index) => (
+                    <div 
+                      key={result.position}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '15px',
+                        padding: '15px',
+                        background: result.position <= 3 
+                          ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)' 
+                          : '#f9fafb',
+                        borderRadius: '8px',
+                        border: result.position <= 3 
+                          ? '2px solid #fbbf24' 
+                          : '1px solid #e5e7eb',
+                        boxShadow: result.position === 1 
+                          ? '0 4px 12px rgba(251, 191, 36, 0.3)' 
+                          : 'none'
+                      }}
+                    >
+                      <div style={{ 
+                        minWidth: '60px', 
+                        textAlign: 'center',
+                        fontSize: '1.2rem',
+                        fontWeight: 'bold'
+                      }}>
+                        {result.position === 1 ? '🥇' : result.position === 2 ? '🥈' : result.position === 3 ? '🥉' : `${result.position}th`}
+                      </div>
+                      <select
+                        value={result.playerName || ''}
+                        onChange={(e) => {
+                          const updated = [...tournamentResults];
+                          updated[index].playerName = e.target.value;
+                          setTournamentResults(updated);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '10px 15px',
+                          fontSize: '1rem',
+                          border: '2px solid #e5e7eb',
+                          borderRadius: '6px',
+                          outline: 'none',
+                          transition: 'border-color 0.2s',
+                          background: 'white',
+                          cursor: 'pointer'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      >
+                        <option value="">Select player...</option>
+                        {getTournamentPlayers().map(playerName => (
+                          <option key={playerName} value={playerName}>
+                            {playerName}
+                          </option>
+                        ))}
+                      </select>
+                      <div style={{ 
+                        minWidth: '100px', 
+                        textAlign: 'right',
+                        fontSize: '1.1rem',
+                        fontWeight: '600',
+                        color: '#059669'
+                      }}>
+                        ${result.amount.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button 
+                  onClick={handleCancelResults}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '1rem',
+                    background: '#e5e7eb',
+                    color: '#374151',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveResults}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '1rem',
+                    background: '#059669',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Save Results & Finish Tournament
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tournament Results Display (when finished) */}
+        {tournamentStatus === 'Finished' && tournamentResults.length > 0 && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            background: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+            maxWidth: '400px',
+            zIndex: 1000
+          }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '1.3rem', color: '#1f2937' }}>
+              🏆 Tournament Results
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {tournamentResults.map((result) => (
+                <div 
+                  key={result.position}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '10px 15px',
+                    background: result.position <= 3 
+                      ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)' 
+                      : '#f9fafb',
+                    borderRadius: '6px',
+                    border: result.position <= 3 
+                      ? '2px solid #fbbf24' 
+                      : '1px solid #e5e7eb'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '1.2rem' }}>
+                      {result.position === 1 ? '🥇' : result.position === 2 ? '🥈' : result.position === 3 ? '🥉' : `${result.position}th`}
+                    </span>
+                    <span style={{ fontWeight: '500' }}>{result.playerName}</span>
+                  </div>
+                  <span style={{ fontWeight: '600', color: '#059669' }}>
+                    ${result.amount.toFixed(2)}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
