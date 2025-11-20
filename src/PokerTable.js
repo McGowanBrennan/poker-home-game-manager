@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useTournamentTimer } from './hooks/useTournamentTimer';
 import './App.css';
 
 function PokerTable() {
@@ -7,6 +8,7 @@ function PokerTable() {
   const navigate = useNavigate();
   const location = useLocation();
   const [reservedSeats, setReservedSeats] = useState({});
+  const [allReservations, setAllReservations] = useState({}); // All reservations across all tables for prize pool calculation
   const [gameName, setGameName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userCode, setUserCode] = useState('');
@@ -23,16 +25,22 @@ function PokerTable() {
   const [showBlindStructure, setShowBlindStructure] = useState(false);
   const [buyInPopupPlayer, setBuyInPopupPlayer] = useState(null); // {seatId, playerName, buyInCount, owedAmount}
   const [showPayoutStructure, setShowPayoutStructure] = useState(false);
-  const [currentBlindLevel, setCurrentBlindLevel] = useState(0);
-  const [timeRemaining, setTimeRemaining] = useState(null); // seconds remaining in current level
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerPaused, setTimerPaused] = useState(false);
-  const isInitialMount = useRef(true);
-  const timerActiveRef = useRef(false); // Track if timer is actively counting down locally
-  const currentTimeRef = useRef(null); // Track current time for accurate saving on unmount
-  const currentLevelRef = useRef(0); // Track current level for accurate saving on unmount
-  const hasLoadedTimerOnce = useRef(false); // Track if we've loaded timer state once (for creators)
-  const tournamentStatusRef = useRef('Registering'); // Track tournament status for polling optimization
+  const [showResultsModal, setShowResultsModal] = useState(false);
+  const [tournamentResults, setTournamentResults] = useState([]); // Array of {position, playerName, amount}
+  
+  // Calculate if current user is game creator
+  const isCreator = userEmail && gameCreator && userEmail === gameCreator;
+  
+  // Tournament timer hook
+  const timer = useTournamentTimer({
+    gameId,
+    gameConfig,
+    tournamentStatus,
+    isCreator,
+    userEmail
+  });
+  
+  const pollingIntervalRef = useRef(null); // Track polling interval to adjust dynamically
 
   const players = [
     { id: 1, position: 'seat-1' },
@@ -74,6 +82,12 @@ function PokerTable() {
           hasBlindStructure: !!gameData.config?.blindStructure
         });
         
+        // Load timer state FIRST (before state updates that trigger initialization effect)
+        // This ensures timer state is loaded before the initialization effect runs
+        if (!skipTimerSync) {
+          timer.loadTimerStateFromData(gameData);
+        }
+
         setGameName(gameData.name);
         setGameCreator(gameData.createdBy);
         setGameDateTime(gameData.gameDateTime);
@@ -83,179 +97,99 @@ function PokerTable() {
         // Set tournament status if available
         if (gameData.config && gameData.config.tournamentStatus) {
           setTournamentStatus(gameData.config.tournamentStatus);
-          tournamentStatusRef.current = gameData.config.tournamentStatus; // Update ref for polling
         }
 
-        // Skip timer sync if requested (for non-active tournaments)
-        if (skipTimerSync) {
-          console.log('⏭️ Skipping timer sync (tournament not In Progress)');
-          // Don't load timer state, just continue to load reservations
-        } else {
-          // Load timer state from database based on role and state
-          // Creators: Only load ONCE (they are the source of truth)
-          // Viewers: Always load when timer not counting (they sync from DB)
-          console.log('🔍 Timer load check:', {
-            isCreator,
-            userEmail,
-            gameCreator,
-            hasLoadedTimerOnce: hasLoadedTimerOnce.current,
-            timerActiveRef: timerActiveRef.current
-          });
-        
-        // Determine if we should load timer state
-        let shouldLoadTimerState;
-        
-        // If user info hasn't loaded yet
-        if (!userEmail || !gameCreator) {
-          // Allow initial load on page refresh, but prevent subsequent loads
-          if (!hasLoadedTimerOnce.current) {
-            shouldLoadTimerState = true;
-            console.log('🔄 Initial load (user info pending)');
-          } else {
-            shouldLoadTimerState = false;
-            console.log('⏳ Waiting for user/creator info (already loaded once)...');
-          }
-        } else if (isCreator && hasLoadedTimerOnce.current) {
-          // Creator has already loaded once - never reload to prevent overwriting local state
-          shouldLoadTimerState = false;
-          console.log('🔒 Creator - skipping reload (already loaded once)');
-        } else if (isCreator && !hasLoadedTimerOnce.current) {
-          // Creator's first load
-          shouldLoadTimerState = true;
-          console.log('🆕 Creator - first load');
-        } else {
-          // Viewer - ALWAYS sync from DB to see manager's pause/resume actions
-          // The background time calculation ensures they stay in sync even while counting
-          shouldLoadTimerState = true;
-          console.log('👀 Viewer - sync from DB (polling)');
+        // Load tournament results if available
+        if (gameData.config && gameData.config.tournamentResults) {
+          setTournamentResults(gameData.config.tournamentResults);
         }
-        
-        console.log('📊 Should load timer state:', shouldLoadTimerState);
-        
-        if (shouldLoadTimerState) {
-          if (gameData.currentBlindLevel !== undefined) {
-            setCurrentBlindLevel(gameData.currentBlindLevel);
-            currentLevelRef.current = gameData.currentBlindLevel;
+
+        // Fetch reservations for this game and current table
+        const reservationsResponse = await fetch(`/api/games/${gameId}/reservations?tableNumber=${currentTable}`);
+        let reservationsData = {};
+      if (reservationsResponse.ok) {
+          reservationsData = await reservationsResponse.json();
+        setReservedSeats(reservationsData);
+        }
+
+        // Fetch ALL reservations across all tables for prize pool calculation
+        // Use gameData.config directly (not gameConfig state) since state updates are async
+        if (gameData.config?.gameType === 'tournament') {
+          const numberOfTables = gameData.config.numberOfTables || 1; // Default to 1 if not set
+          console.log('🏆 Fetching all reservations for tournament with', numberOfTables, 'table(s)');
+          
+          const allReservationsPromises = [];
+          for (let table = 1; table <= numberOfTables; table++) {
+            allReservationsPromises.push(
+              fetch(`/api/games/${gameId}/reservations?tableNumber=${table}`)
+                .then(res => {
+                  if (res.ok) {
+                    return res.json();
+                  }
+                  console.warn(`⚠️ Failed to fetch reservations for table ${table}`);
+                  return {};
+                })
+                .catch(error => {
+                  console.error(`❌ Error fetching table ${table}:`, error);
+                  return {};
+                })
+            );
           }
           
-          // Calculate elapsed time if timer was running in the background
-          let adjustedTimeRemaining = gameData.timeRemainingSeconds;
-          
-          console.log('⏰ Timer state check:', {
-            timerRunning: gameData.timerRunning,
-            timerPaused: gameData.timerPaused,
-            timerLastUpdate: gameData.timerLastUpdate,
-            timeRemainingSeconds: gameData.timeRemainingSeconds,
-            willCalculate: gameData.timerRunning && !gameData.timerPaused && gameData.timerLastUpdate && gameData.timeRemainingSeconds !== null
-          });
-          
-          if (gameData.timerRunning && !gameData.timerPaused && gameData.timerLastUpdate && gameData.timeRemainingSeconds !== null) {
-            const lastUpdate = new Date(gameData.timerLastUpdate);
-            const now = new Date();
-            const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
+          Promise.all(allReservationsPromises).then(allTablesData => {
+            console.log('📊 Fetched reservations from all tables:', allTablesData);
             
-            console.log('🕐 Background timer calculation:', {
-              lastUpdate: lastUpdate.toLocaleTimeString(),
-              now: now.toLocaleTimeString(),
-              elapsedSeconds,
-              savedTime: gameData.timeRemainingSeconds,
-              willAdjustTo: gameData.timeRemainingSeconds - elapsedSeconds
+            // Combine all tables' reservations into one object
+            const combined = {};
+            allTablesData.forEach((tableData, index) => {
+              console.log(`  Table ${index + 1} has ${Object.keys(tableData).length} reservations`);
+              Object.keys(tableData).forEach(seatId => {
+                // Use unique key combining table and seat to avoid conflicts
+                // For single table, keys will be: table1_seat1, table1_seat2, etc.
+                const uniqueKey = numberOfTables > 1 ? `table${index + 1}_seat${seatId}` : seatId;
+                combined[uniqueKey] = tableData[seatId];
+              });
             });
             
-            // Subtract elapsed time from remaining time
-            adjustedTimeRemaining = gameData.timeRemainingSeconds - elapsedSeconds;
-            
-            // Check if we need to advance levels (use gameData.config, not gameConfig state)
-            const blindStructure = gameData.config?.blindStructure;
-            let currentLevel = gameData.currentBlindLevel;
-            let timeLeft = adjustedTimeRemaining;
-            
-            if (blindStructure && blindStructure.length > 0) {
-              while (timeLeft <= 0 && currentLevel < blindStructure.length - 1) {
-                // Move to next level
-                currentLevel++;
-                const nextLevelData = blindStructure[currentLevel];
-                timeLeft += (nextLevelData.duration * 60); // Add next level's duration
-                console.log('📈 Advanced to level', currentLevel + 1, 'with', timeLeft, 'seconds');
-              }
-              
-              // Update level if it changed
-              if (currentLevel !== gameData.currentBlindLevel) {
-                setCurrentBlindLevel(currentLevel);
-                currentLevelRef.current = currentLevel;
-                // Save the new level to database
-                saveTimerState(currentLevel, Math.max(0, timeLeft), true, false);
-              }
-            }
-            
-            adjustedTimeRemaining = Math.max(0, timeLeft);
-            console.log('✅ Adjusted time remaining:', adjustedTimeRemaining, 'seconds');
-          }
-          
-          // If no timer state exists yet but tournament is In Progress, initialize timer immediately
-          const statusNow = gameData.config?.tournamentStatus;
-          if ((gameData.timeRemainingSeconds === null || gameData.timeRemainingSeconds === undefined) && statusNow === 'In Progress') {
-            if (gameData.config?.blindStructure && gameData.config.blindStructure.length > 0) {
-              const first = gameData.config.blindStructure[0];
-              const initSeconds = (parseInt(first.duration, 10) || 0) * 60;
-              setCurrentBlindLevel(0);
-              currentLevelRef.current = 0;
-              setTimeRemaining(initSeconds);
-              currentTimeRef.current = initSeconds;
-              setTimerRunning(true);
-              setTimerPaused(false);
-              // Attempt to persist initial state; server will authorize (only creator can succeed)
-              try {
-                await saveTimerState(0, initSeconds, true, false);
-                console.log('🆕 Initialized timer state on server');
-              } catch (e) {
-                console.log('ℹ️ Could not persist initial timer state (likely not creator)');
-              }
-              hasLoadedTimerOnce.current = true;
-            } else {
-              console.log('⏳ Blind structure missing; cannot initialize timer');
-            }
-          } else if (adjustedTimeRemaining !== null && adjustedTimeRemaining !== undefined) {
-            setTimeRemaining(adjustedTimeRemaining);
-            currentTimeRef.current = adjustedTimeRemaining;
-            // Mark timer as loaded once we have valid state
-            hasLoadedTimerOnce.current = true;
-          }
-          // Only adopt server running/paused flags when server has a concrete time value
-          if (gameData.timeRemainingSeconds !== null && gameData.timeRemainingSeconds !== undefined) {
-            if (gameData.timerRunning !== undefined) {
-              setTimerRunning(gameData.timerRunning);
-            }
-            if (gameData.timerPaused !== undefined) {
-              setTimerPaused(gameData.timerPaused);
-            }
-          }
-          
-          // Mark that initial mount is complete
-          if (isInitialMount.current) {
-            isInitialMount.current = false;
-          }
+            console.log('💰 Combined all reservations for prize pool:', combined, 'Total keys:', Object.keys(combined).length);
+            setAllReservations(combined);
+          }).catch(error => {
+            console.error('❌ Error in Promise.all for all reservations:', error);
+            // Fallback: use current table's reservations if we have them
+            console.log('🔄 Using fallback: current table reservations');
+            setAllReservations(reservationsData || {});
+          });
+        } else {
+          // For non-tournament games, just use current table's reservations
+          console.log('💰 Non-tournament game, using current table reservations for allReservations');
+          setAllReservations(reservationsData || {});
         }
-        } // Close skipTimerSync check
-      }
-
-      // Fetch reservations for this game and current table
-      const reservationsResponse = await fetch(`/api/games/${gameId}/reservations?tableNumber=${currentTable}`);
-      if (reservationsResponse.ok) {
-        const reservationsData = await reservationsResponse.json();
-        setReservedSeats(reservationsData);
       }
     } catch (error) {
       console.error('Error fetching game data:', error);
     }
   };
 
-  // Reset initial mount flag when gameId changes (new game loaded)
+  // Update polling interval when tournament status or timer pause state changes
   useEffect(() => {
-    isInitialMount.current = true;
-    timerActiveRef.current = false; // Ensure we load from DB on new game
-    hasLoadedTimerOnce.current = false; // Reset for new game
-  }, [gameId]);
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      
+      // If timer is paused, stop frequent polling (timer not changing)
+      const skipTimerSync = tournamentStatus !== 'In Progress' || timer.timerPaused;
+      let interval = timer.getPollInterval(tournamentStatus);
+      
+      // When paused during "In Progress", use longer interval (30 seconds) since timer isn't changing
+      if (tournamentStatus === 'In Progress' && timer.timerPaused) {
+        interval = 30000; // 30 seconds when paused
+      }
+      
+      pollingIntervalRef.current = setInterval(() => {
+        fetchGameData(skipTimerSync);
+      }, interval);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournamentStatus, timer.timerPaused]);
 
   // Load game data on mount and poll for updates
   useEffect(() => {
@@ -280,171 +214,28 @@ function PokerTable() {
 
     fetchGameData();
     
-    // Poll for updates every 2 seconds
-    // Optimization: Skip timer sync for non-active tournaments to save DB calls
-    const interval = setInterval(() => {
-      const status = tournamentStatusRef.current;
-      const skipTimerSync = status !== 'In Progress';
-      
-      if (skipTimerSync) {
-        console.log('💤 Tournament status:', status, '- polling without timer sync');
-      }
-      
-      fetchGameData(skipTimerSync);
-    }, 2000);
+    // Start polling based on tournament status and timer pause state
+    const skipTimerSync = tournamentStatus !== 'In Progress' || timer.timerPaused;
+    let interval = timer.getPollInterval(tournamentStatus);
     
-    return () => clearInterval(interval);
+    // When paused during "In Progress", use longer interval since timer isn't changing
+    if (tournamentStatus === 'In Progress' && timer.timerPaused) {
+      interval = 30000; // 30 seconds when paused
+    }
+    
+    pollingIntervalRef.current = setInterval(() => {
+      fetchGameData(skipTimerSync);
+    }, interval);
+    
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, currentTable]);
 
-  // Save timer state to database
-  const saveTimerState = async (level, seconds, running, paused) => {
-    if (!userEmail) return;
-
-    try {
-      await fetch(`/api/games/${gameId}/timer-state`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userEmail,
-          currentBlindLevel: level,
-          timeRemainingSeconds: seconds,
-          timerRunning: running,
-          timerPaused: paused
-        })
-      });
-    } catch (error) {
-      console.error('Error saving timer state:', error);
-    }
-  };
-
-  // Initialize blind timer when status changes to "In Progress"
-  useEffect(() => {
-    if (tournamentStatus === 'In Progress' && gameConfig?.blindStructure && gameConfig.blindStructure.length > 0) {
-      // Only initialize if:
-      // 1. Timer is not already running (fresh start)
-      // 2. AND we haven't loaded from DB yet (not a page refresh)
-      if (!timerRunning && !hasLoadedTimerOnce.current) {
-        console.log('🆕 Initializing new timer (fresh start)');
-        const firstLevel = gameConfig.blindStructure[0];
-        // Convert minutes to seconds
-        const durationInSeconds = firstLevel.duration * 60;
-        setTimeRemaining(durationInSeconds);
-        setCurrentBlindLevel(0);
-        setTimerRunning(true);
-        setTimerPaused(false);
-        // Initialize refs
-        currentTimeRef.current = durationInSeconds;
-        currentLevelRef.current = 0;
-        // Save initial timer state
-        saveTimerState(0, durationInSeconds, true, false);
-      } else if (timerRunning && hasLoadedTimerOnce.current) {
-        console.log('✅ Timer already running from DB state (page refresh)');
-      }
-    } else if (tournamentStatus !== 'In Progress') {
-      // Stop the timer if status changes away from "In Progress"
-      setTimerRunning(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tournamentStatus, gameConfig, timerRunning]);
-
-  // Countdown timer logic
-  useEffect(() => {
-    console.log('⏱️ Timer effect running:', {
-      timerRunning,
-      timerPaused,
-      timeRemaining,
-      willRun: timerRunning && !timerPaused && timeRemaining !== null
-    });
-    
-    // Don't run if timer is not running, paused, or no time remaining
-    if (!timerRunning || timerPaused || timeRemaining === null) {
-      // Timer is not actively counting down
-      timerActiveRef.current = false;
-      console.log('⏹️ Timer stopped/paused - timerActiveRef set to false');
-      return;
-    }
-
-    // Timer is actively counting down
-    // Only set timerActiveRef for creator to prevent polling from overwriting their local state
-    // Viewers should keep timerActiveRef = false so they always sync from DB
-    if (isCreator) {
-      timerActiveRef.current = true;
-      console.log('▶️ Creator timer running - timerActiveRef set to true');
-    } else {
-      timerActiveRef.current = false;
-      console.log('▶️ Viewer timer running - timerActiveRef stays false (will sync from DB)');
-    }
-    let tickCount = 0;
-
-    const interval = setInterval(() => {
-      setTimeRemaining(prev => {
-        const newTime = prev - 1;
-        tickCount++;
-        
-        // Update ref with current time for accurate unmount save
-        currentTimeRef.current = newTime;
-        
-        // SCALABILITY: Only game creator saves to database
-        // Other viewers just calculate from timestamp
-        if (isCreator) {
-          // Save to database every 10 seconds (reduced frequency for scalability)
-          // Also save on level changes for accuracy
-          if (tickCount % 10 === 0) {
-            saveTimerState(currentBlindLevel, newTime, true, false);
-          }
-        }
-        
-        if (newTime <= 0) {
-          // Time's up! Advance to next level
-          const nextLevel = currentBlindLevel + 1;
-          if (gameConfig?.blindStructure && nextLevel < gameConfig.blindStructure.length) {
-            // Move to next level
-            const nextLevelData = gameConfig.blindStructure[nextLevel];
-            const durationInSeconds = nextLevelData.duration * 60;
-            
-            // Update states and refs
-            setCurrentBlindLevel(nextLevel);
-            currentLevelRef.current = nextLevel;
-            currentTimeRef.current = durationInSeconds;
-            
-            // SCALABILITY: Only creator saves level changes
-            if (isCreator) {
-              saveTimerState(nextLevel, durationInSeconds, true, false);
-            }
-            
-            // Reset tick count
-            tickCount = 0;
-            
-            return durationInSeconds;
-          } else {
-            // No more levels, stop the timer
-            timerActiveRef.current = false;
-            setTimerRunning(false);
-            if (isCreator) {
-              saveTimerState(currentBlindLevel, 0, false, false);
-            }
-            return 0;
-          }
-        }
-        
-        return newTime;
-      });
-    }, 1000);
-
-    return () => {
-      clearInterval(interval);
-      // SCALABILITY: Only creator saves on unmount
-      if (isCreator && currentTimeRef.current !== null) {
-        saveTimerState(currentLevelRef.current, currentTimeRef.current, true, false);
-      }
-      // Clean up - timer is no longer actively counting
-      timerActiveRef.current = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timerRunning, timerPaused, timeRemaining, currentBlindLevel, gameConfig]);
 
   const handleReserveSeat = async (seatId) => {
     // Check if seat is already reserved
@@ -491,6 +282,8 @@ function PokerTable() {
       if (response.ok) {
         const data = await response.json();
         setReservedSeats(data.reservations);
+        // Immediately refresh all data to sync across tables and update prize pool
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to reserve seat');
@@ -601,6 +394,8 @@ function PokerTable() {
       if (response.ok) {
         const data = await response.json();
         setReservedSeats(data.reservations);
+        // Immediately refresh all data to sync across tables and update prize pool
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to remove reservation');
@@ -640,6 +435,25 @@ function PokerTable() {
             addOnPurchased: data.reservation.addOnPurchased
           }
         }));
+        
+        // Also update allReservations for accurate prize pool calculation
+        const numberOfTables = gameConfig?.numberOfTables || 1;
+        const uniqueKey = numberOfTables > 1 ? `table${currentTable}_seat${seatId}` : seatId;
+        
+        setAllReservations(prev => ({
+          ...prev,
+          [uniqueKey]: {
+            ...prev[uniqueKey],
+            playerName: prev[uniqueKey]?.playerName || data.reservation.playerName,
+            owedAmount: data.reservation.owedAmount,
+            addOnPurchased: data.reservation.addOnPurchased
+          }
+        }));
+        
+        console.log('🔄 Updated allReservations for prize pool:', uniqueKey, 'Amount:', data.reservation.owedAmount);
+        
+        // Immediately refresh all reservations to ensure prize pool is accurate across all tables
+        fetchGameData(tournamentStatus !== 'In Progress');
       } else {
         const error = await response.json();
         alert(error.error || 'Failed to update buy-in count');
@@ -650,20 +464,23 @@ function PokerTable() {
     }
   };
 
-  // Check if current user is the game creator
-  const isCreator = userEmail && gameCreator && userEmail === gameCreator;
-
-  // Calculate prize pool (sum of all buy-ins across all players)
+  // Calculate prize pool (sum of all buy-ins across all players on all tables)
   const calculatePrizePool = () => {
     if (!gameConfig || gameConfig.gameType !== 'tournament') {
       return 0;
     }
     
-    // Sum up all owed amounts (which represents total buy-ins)
-    const total = Object.values(reservedSeats).reduce((sum, reservation) => {
-      return sum + (parseFloat(reservation.owedAmount) || 0);
+    // Sum up all owed amounts across ALL tables (not just current table)
+    const reservationsArray = Object.values(allReservations);
+    console.log('🏆 Calculating prize pool from', reservationsArray.length, 'reservations:', allReservations);
+    
+    const total = reservationsArray.reduce((sum, reservation) => {
+      const amount = parseFloat(reservation?.owedAmount) || 0;
+      console.log('  - Reservation:', reservation, 'Amount:', amount);
+      return sum + amount;
     }, 0);
     
+    console.log('💰 Total prize pool calculated:', total);
     return total;
   };
 
@@ -682,46 +499,6 @@ function PokerTable() {
   };
 
   // Format time remaining as MM:SS
-  const formatTime = (seconds) => {
-    if (seconds === null || seconds === undefined) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Get current blind level data
-  const getCurrentBlindLevel = () => {
-    if (!gameConfig?.blindStructure || currentBlindLevel >= gameConfig.blindStructure.length) {
-      return null;
-    }
-    return gameConfig.blindStructure[currentBlindLevel];
-  };
-
-  // Toggle pause/play for timer
-  const handleToggleTimerPause = () => {
-    console.log('⏸️ Pause button clicked:', {
-      isCreator,
-      userEmail,
-      gameCreator,
-      currentPaused: timerPaused
-    });
-    
-    if (!isCreator) {
-      console.error('❌ Not creator, cannot pause');
-      return;
-    }
-    
-    const newPausedState = !timerPaused;
-    console.log('✅ Toggling pause to:', newPausedState);
-    setTimerPaused(newPausedState);
-    
-    // Note: timerActiveRef.current will be set to false by the countdown useEffect
-    // when it sees timerPaused = true, but creators won't reload from DB
-    // so the paused state will be preserved locally
-    
-    // Save the paused state to database so viewers can see it
-    saveTimerState(currentBlindLevel, timeRemaining, timerRunning, newPausedState);
-  };
 
   const handleRandomizeSeating = async () => {
     if (!window.confirm('Are you sure you want to randomize the seating chart? This will shuffle all players and redistribute them evenly across tables.')) {
@@ -756,11 +533,32 @@ function PokerTable() {
   };
 
   const handleUpdateTournamentStatus = async () => {
+    // Prevent status changes from "Finished"
+    if (tournamentStatus === 'Finished') {
+      alert('Tournament is finished and cannot be changed to another status.');
+      return;
+    }
+
     const statuses = ['Registering', 'In Progress', 'Finished'];
     const currentIndex = statuses.indexOf(tournamentStatus);
     const nextIndex = (currentIndex + 1) % statuses.length;
     const newStatus = statuses[nextIndex];
 
+    // If changing to "Finished", show results entry modal instead of immediately updating
+    if (newStatus === 'Finished' && tournamentStatus === 'In Progress') {
+      // Initialize results array with payout structure
+      const payouts = calculatePayouts();
+      const initialResults = payouts.map(payout => ({
+        position: payout.position,
+        playerName: '',
+        amount: payout.amount
+      }));
+      setTournamentResults(initialResults);
+      setShowResultsModal(true);
+      return;
+    }
+
+    // For other status changes, update immediately
     try {
       const response = await fetch(`/api/games/${gameId}/status`, {
         method: 'POST',
@@ -775,7 +573,6 @@ function PokerTable() {
 
       if (response.ok) {
         setTournamentStatus(newStatus);
-        tournamentStatusRef.current = newStatus;
         // Immediately fetch latest game state; if moving to In Progress, do a full timer sync
         const skipTimerSync = newStatus !== 'In Progress';
         fetchGameData(skipTimerSync);
@@ -787,6 +584,77 @@ function PokerTable() {
       console.error('Error updating tournament status:', error);
       alert('Failed to update tournament status. Please try again.');
     }
+  };
+
+  const handleSaveResults = async () => {
+    // Validate that all positions have player names
+    const emptyPositions = tournamentResults.filter(r => !r.playerName || r.playerName.trim() === '');
+    if (emptyPositions.length > 0) {
+      alert('Please select players for all paid positions.');
+      return;
+    }
+
+    try {
+      // First save the results
+      const resultsResponse = await fetch(`/api/games/${gameId}/results`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          results: tournamentResults
+        })
+      });
+
+      if (!resultsResponse.ok) {
+        const error = await resultsResponse.json();
+        console.error('Error saving results:', error);
+        alert(error.error || error.details || 'Failed to save tournament results');
+        return;
+      }
+
+      // Then update status to "Finished"
+      const statusResponse = await fetch(`/api/games/${gameId}/status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userEmail: userEmail,
+          status: 'Finished'
+        })
+      });
+
+      if (statusResponse.ok) {
+        setTournamentStatus('Finished');
+        setShowResultsModal(false);
+        // Navigate to dashboard after saving results
+        navigate('/dashboard', { state: { userEmail, userCode } });
+      } else {
+        const error = await statusResponse.json();
+        alert(error.error || 'Failed to update tournament status');
+      }
+    } catch (error) {
+      console.error('Error saving tournament results:', error);
+      alert(`Failed to save tournament results: ${error.message || 'Unknown error'}. Please check the console for details.`);
+    }
+  };
+
+  // Get unique player names from all reservations
+  const getTournamentPlayers = () => {
+    const playersSet = new Set();
+    Object.values(allReservations).forEach(reservation => {
+      if (reservation?.playerName) {
+        playersSet.add(reservation.playerName);
+      }
+    });
+    return Array.from(playersSet).sort();
+  };
+
+  const handleCancelResults = () => {
+    setShowResultsModal(false);
+    setTournamentResults([]);
   };
 
   const handleOpenEditDetails = () => {
@@ -919,8 +787,8 @@ function PokerTable() {
               
               const handleButtonClick = () => {
                 if (isReserved && isCreator) {
-                  // Open buy-in popup for tournaments during registration
-                  if (gameConfig?.gameType === 'tournament' && tournamentStatus === 'Registering') {
+                  // Open buy-in popup for tournaments (allow updates during Registering and In Progress)
+                  if (gameConfig?.gameType === 'tournament' && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress')) {
                     setBuyInPopupPlayer({
                       seatId: player.id,
                       playerName,
@@ -974,16 +842,16 @@ function PokerTable() {
             {gameConfig && gameConfig.gameType === 'tournament' && (
               <div className="tournament-status-container">
                 <button
-                  className={`tournament-status-btn ${isCreator ? 'clickable' : ''}`}
-                  onClick={isCreator ? handleUpdateTournamentStatus : undefined}
-                  disabled={!isCreator}
-                  title={isCreator ? 'Click to change status' : ''}
+                  className={`tournament-status-btn ${isCreator && tournamentStatus !== 'Finished' ? 'clickable' : ''}`}
+                  onClick={isCreator && tournamentStatus !== 'Finished' ? handleUpdateTournamentStatus : undefined}
+                  disabled={!isCreator || tournamentStatus === 'Finished'}
+                  title={tournamentStatus === 'Finished' ? 'Tournament is finished' : (isCreator ? 'Click to change status' : '')}
                 >
                   {tournamentStatus}
                 </button>
                 
-                {/* Prize Pool Display - Show during Registering status */}
-                {tournamentStatus === 'Registering' && gameConfig.buyInAmount && (
+                {/* Prize Pool Display - Show during Registering, In Progress, and Finished */}
+                {gameConfig.buyInAmount && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress' || tournamentStatus === 'Finished') && (
                   <div 
                     className="prize-pool-display clickable"
                     onClick={() => gameConfig?.payoutStructure && setShowPayoutStructure(true)}
@@ -996,43 +864,43 @@ function PokerTable() {
                 )}
 
                 {/* Blind Timer Display - Show during In Progress status */}
-                {tournamentStatus === 'In Progress' && getCurrentBlindLevel() && (
+                {tournamentStatus === 'In Progress' && timer.getCurrentBlindLevel() && (
                   <div className="blind-timer-display">
                     <div className="blind-timer-header">
                       <span className="blind-timer-level">
-                        Level {currentBlindLevel + 1}
-                        {getCurrentBlindLevel().isBreak && ' - BREAK'}
-                        {timerPaused && ' - PAUSED'}
+                        Level {timer.currentBlindLevel + 1}
+                        {timer.getCurrentBlindLevel().isBreak && ' - BREAK'}
+                        {timer.timerPaused && ' - PAUSED'}
                       </span>
                       <div className="blind-timer-controls">
-                        <span className="blind-timer-countdown" style={{ opacity: timerPaused ? 0.6 : 1 }}>
-                          {formatTime(timeRemaining)}
+                        <span className="blind-timer-countdown" style={{ opacity: timer.timerPaused ? 0.6 : 1 }}>
+                          {timer.formatTime(timer.timeRemaining)}
                         </span>
                         {isCreator && (
                           <button 
                             className="timer-pause-btn"
-                            onClick={handleToggleTimerPause}
-                            title={timerPaused ? 'Resume timer' : 'Pause timer'}
+                            onClick={timer.togglePause}
+                            title={timer.timerPaused ? 'Resume timer' : 'Pause timer'}
                           >
-                            {timerPaused ? '▶' : '⏸'}
+                            {timer.timerPaused ? '▶' : '⏸'}
                           </button>
                         )}
                       </div>
                     </div>
-                    {!getCurrentBlindLevel().isBreak && (
+                    {!timer.getCurrentBlindLevel().isBreak && (
                       <div className="blind-timer-info">
                         <div className="blind-info-item">
                           <span className="blind-info-label">SB</span>
-                          <span className="blind-info-value">{getCurrentBlindLevel().smallBlind?.toLocaleString() || '-'}</span>
+                          <span className="blind-info-value">{timer.getCurrentBlindLevel().smallBlind?.toLocaleString() || '-'}</span>
                         </div>
                         <div className="blind-info-item">
                           <span className="blind-info-label">BB</span>
-                          <span className="blind-info-value">{getCurrentBlindLevel().bigBlind?.toLocaleString() || '-'}</span>
+                          <span className="blind-info-value">{timer.getCurrentBlindLevel().bigBlind?.toLocaleString() || '-'}</span>
                         </div>
-                        {getCurrentBlindLevel().bbAnte && (
+                        {timer.getCurrentBlindLevel().bbAnte && (
                           <div className="blind-info-item">
                             <span className="blind-info-label">Ante</span>
-                            <span className="blind-info-value">{getCurrentBlindLevel().bbAnte?.toLocaleString()}</span>
+                            <span className="blind-info-value">{timer.getCurrentBlindLevel().bbAnte?.toLocaleString()}</span>
                           </div>
                         )}
                       </div>
@@ -1490,6 +1358,196 @@ function PokerTable() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tournament Results Entry Modal */}
+        {showResultsModal && (
+          <div className="modal-overlay" onClick={handleCancelResults}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <button 
+                className="modal-close" 
+                onClick={handleCancelResults}
+                style={{ position: 'absolute', top: '10px', right: '10px' }}
+              >
+                ×
+              </button>
+              
+              <h3 style={{ margin: '0 0 20px 0', fontSize: '1.5rem', color: '#1f2937' }}>
+                🏆 Enter Tournament Results
+              </h3>
+              
+              <div style={{ 
+                padding: '15px', 
+                background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', 
+                borderRadius: '10px',
+                border: '2px solid #86efac',
+                marginBottom: '20px',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '4px' }}>Total Prize Pool</div>
+                <div style={{ fontSize: '2rem', fontWeight: '900', color: '#059669' }}>
+                  ${calculatePrizePool().toFixed(2)}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 15px 0', fontSize: '1.1rem', color: '#374151' }}>
+                  Enter Player Names for Each Position
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {tournamentResults.map((result, index) => (
+                    <div 
+                      key={result.position}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '15px',
+                        padding: '15px',
+                        background: result.position <= 3 
+                          ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)' 
+                          : '#f9fafb',
+                        borderRadius: '8px',
+                        border: result.position <= 3 
+                          ? '2px solid #fbbf24' 
+                          : '1px solid #e5e7eb',
+                        boxShadow: result.position === 1 
+                          ? '0 4px 12px rgba(251, 191, 36, 0.3)' 
+                          : 'none'
+                      }}
+                    >
+                      <div style={{ 
+                        minWidth: '60px', 
+                        textAlign: 'center',
+                        fontSize: '1.2rem',
+                        fontWeight: 'bold'
+                      }}>
+                        {result.position === 1 ? '🥇' : result.position === 2 ? '🥈' : result.position === 3 ? '🥉' : `${result.position}th`}
+                      </div>
+                      <select
+                        value={result.playerName || ''}
+                        onChange={(e) => {
+                          const updated = [...tournamentResults];
+                          updated[index].playerName = e.target.value;
+                          setTournamentResults(updated);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '10px 15px',
+                          fontSize: '1rem',
+                          border: '2px solid #e5e7eb',
+                          borderRadius: '6px',
+                          outline: 'none',
+                          transition: 'border-color 0.2s',
+                          background: 'white',
+                          cursor: 'pointer'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                        onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      >
+                        <option value="">Select player...</option>
+                        {getTournamentPlayers().map(playerName => (
+                          <option key={playerName} value={playerName}>
+                            {playerName}
+                          </option>
+                        ))}
+                      </select>
+                      <div style={{ 
+                        minWidth: '100px', 
+                        textAlign: 'right',
+                        fontSize: '1.1rem',
+                        fontWeight: '600',
+                        color: '#059669'
+                      }}>
+                        ${result.amount.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button 
+                  onClick={handleCancelResults}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '1rem',
+                    background: '#e5e7eb',
+                    color: '#374151',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveResults}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '1rem',
+                    background: '#059669',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  Save Results & Finish Tournament
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tournament Results Display (when finished) */}
+        {tournamentStatus === 'Finished' && tournamentResults.length > 0 && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            background: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+            maxWidth: '400px',
+            zIndex: 1000
+          }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '1.3rem', color: '#1f2937' }}>
+              🏆 Tournament Results
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {tournamentResults.map((result) => (
+                <div 
+                  key={result.position}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '10px 15px',
+                    background: result.position <= 3 
+                      ? 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)' 
+                      : '#f9fafb',
+                    borderRadius: '6px',
+                    border: result.position <= 3 
+                      ? '2px solid #fbbf24' 
+                      : '1px solid #e5e7eb'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '1.2rem' }}>
+                      {result.position === 1 ? '🥇' : result.position === 2 ? '🥈' : result.position === 3 ? '🥉' : `${result.position}th`}
+                    </span>
+                    <span style={{ fontWeight: '500' }}>{result.playerName}</span>
+                  </div>
+                  <span style={{ fontWeight: '600', color: '#059669' }}>
+                    ${result.amount.toFixed(2)}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
