@@ -23,7 +23,8 @@ function PokerTable() {
   const [editTime, setEditTime] = useState('');
   const [editNote, setEditNote] = useState('');
   const [showBlindStructure, setShowBlindStructure] = useState(false);
-  const [buyInPopupPlayer, setBuyInPopupPlayer] = useState(null); // {seatId, playerName, buyInCount, owedAmount}
+  const [buyInPopupPlayer, setBuyInPopupPlayer] = useState(null); // {seatId, playerName, buyInCount, owedAmount, isCashGame}
+  const [cashBuyInAmount, setCashBuyInAmount] = useState(''); // Manual buy-in amount for cash games
   const [showPayoutStructure, setShowPayoutStructure] = useState(false);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [tournamentResults, setTournamentResults] = useState([]); // Array of {position, playerName, amount}
@@ -406,8 +407,12 @@ function PokerTable() {
     }
   };
 
-  const handleUpdateBuyInCount = async (seatId, newCount, addOnPurchased = false) => {
+  const handleUpdateBuyInCount = async (seatId, newCount, addOnPurchased = false, customAmount = null) => {
     try {
+      // For cash games, use custom amount if provided, otherwise calculate from count
+      const buyInAmount = customAmount !== null ? customAmount : (gameConfig?.buyInAmount || 0);
+      const finalAmount = customAmount !== null ? customAmount : (newCount * parseFloat(buyInAmount));
+      
       const response = await fetch(`/api/games/${gameId}/reservations/${seatId}/buyins`, {
         method: 'PATCH',
         headers: {
@@ -417,7 +422,8 @@ function PokerTable() {
           userEmail: userEmail,
           tableNumber: currentTable,
           buyInCount: newCount,
-          buyInAmount: gameConfig?.buyInAmount || 0,
+          buyInAmount: buyInAmount,
+          customBuyInAmount: customAmount, // For cash games
           addOnPurchased: addOnPurchased,
           addOnCost: gameConfig?.addOnCost || 0
         })
@@ -465,12 +471,23 @@ function PokerTable() {
   };
 
   // Calculate prize pool (sum of all buy-ins across all players on all tables)
+  // For tournaments: prize pool
+  // For cash games: total buy-ins on table
   const calculatePrizePool = () => {
-    if (!gameConfig || gameConfig.gameType !== 'tournament') {
+    if (!gameConfig) {
       return 0;
     }
     
-    // Sum up all owed amounts across ALL tables (not just current table)
+    // For cash games, use current table reservations
+    // For tournaments, use allReservations to include all tables
+    if (gameConfig.gameType === 'cash') {
+      const total = Object.values(reservedSeats).reduce((sum, reservation) => {
+        return sum + (parseFloat(reservation?.owedAmount) || 0);
+      }, 0);
+      return total;
+    }
+    
+    // Sum up all owed amounts across ALL tables (not just current table) for tournaments
     const reservationsArray = Object.values(allReservations);
     console.log('🏆 Calculating prize pool from', reservationsArray.length, 'reservations:', allReservations);
     
@@ -782,23 +799,31 @@ function PokerTable() {
               const playerName = reservation?.playerName || '';
               const owedAmount = reservation?.owedAmount || 0;
               const buyInAmount = parseFloat(gameConfig?.buyInAmount) || 0;
-              const buyInCount = buyInAmount > 0 ? Math.round(owedAmount / buyInAmount) : 0;
+              // For cash games, we don't calculate buy-in count (it's just the amount)
+              // For tournaments, calculate count based on fixed buy-in amount
+              const buyInCount = gameConfig?.gameType === 'cash' ? (owedAmount > 0 ? 1 : 0) : (buyInAmount > 0 ? Math.round(owedAmount / buyInAmount) : 0);
               const hasTotal = owedAmount > 0;
               
               const handleButtonClick = () => {
                 if (isReserved && isCreator) {
-                  // Open buy-in popup for tournaments (allow updates during Registering and In Progress)
-                  if (gameConfig?.gameType === 'tournament' && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress')) {
+                  // Open buy-in popup for tournaments (allow updates during Registering and In Progress) or cash games
+                  if ((gameConfig?.gameType === 'tournament' && (tournamentStatus === 'Registering' || tournamentStatus === 'In Progress')) || 
+                      gameConfig?.gameType === 'cash') {
                     setBuyInPopupPlayer({
                       seatId: player.id,
                       playerName,
                       buyInCount,
                       owedAmount,
-                      addOnPurchased: reservation?.addOnPurchased || false
+                      addOnPurchased: reservation?.addOnPurchased || false,
+                      isCashGame: gameConfig?.gameType === 'cash'
                     });
+                    // Initialize cash buy-in amount input with existing amount
+                    if (gameConfig?.gameType === 'cash') {
+                      setCashBuyInAmount(owedAmount > 0 ? owedAmount.toFixed(2) : '');
+                    }
                   } else {
                     // For non-tournaments or other statuses, remove directly
-                  handleRemoveReservation(player.id);
+                    handleRemoveReservation(player.id);
                   }
                 } else if (!isReserved) {
                   handleReserveSeat(player.id);
@@ -819,8 +844,12 @@ function PokerTable() {
                       />
                         {hasTotal && (
                           <div className="avatar-hover-amount">
-                            <div className="hover-amount-value">${owedAmount.toFixed(0)}</div>
-                            <div className="hover-amount-label">{buyInCount} buy-in{buyInCount !== 1 ? 's' : ''}</div>
+                            <div className="hover-amount-value">${owedAmount.toFixed(2)}</div>
+                            <div className="hover-amount-label">
+                              {gameConfig?.gameType === 'cash' 
+                                ? 'buy-in' 
+                                : `${buyInCount} buy-in${buyInCount !== 1 ? 's' : ''}`}
+                            </div>
                           </div>
                         )}
                       </>
@@ -859,7 +888,7 @@ function PokerTable() {
                     title={gameConfig?.payoutStructure ? 'Click to view payout structure' : ''}
                   >
                     <span className="prize-pool-label">Prize Pool:</span>
-                    <span className="prize-pool-amount">${calculatePrizePool()}</span>
+                    <span className="prize-pool-amount">${calculatePrizePool().toFixed(2)}</span>
                   </div>
                 )}
 
@@ -907,6 +936,16 @@ function PokerTable() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Cash Game Total Buy-Ins Display */}
+            {gameConfig && gameConfig.gameType === 'cash' && (
+              <div className="tournament-status-container">
+                <div className="prize-pool-display" style={{ cursor: 'default' }}>
+                  <span className="prize-pool-label">Total Buy-Ins:</span>
+                  <span className="prize-pool-amount">${calculatePrizePool().toFixed(2)}</span>
+                </div>
               </div>
             )}
           </div>
@@ -1155,56 +1194,96 @@ function PokerTable() {
                 {buyInPopupPlayer.playerName}
               </h3>
               
-              <div className="buyin-popup-controls">
-                <button 
-                  className="buyin-popup-btn minus"
-                  onClick={() => {
-                    const newCount = Math.max(0, buyInPopupPlayer.buyInCount - 1);
-                    const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
-                    const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
-                    const newTotal = buyInCost + addOnCostParsed;
-                    
-                    handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
-                    setBuyInPopupPlayer({
-                      ...buyInPopupPlayer,
-                      buyInCount: newCount,
-                      owedAmount: newTotal
-                    });
-                  }}
-                  disabled={buyInPopupPlayer.buyInCount === 0}
-                >
-                  −
-                </button>
-                
-                <div className="buyin-popup-display">
-                  <div className="buyin-popup-count">{buyInPopupPlayer.buyInCount}</div>
-                  <div className="buyin-popup-label">
-                    buy-in{buyInPopupPlayer.buyInCount !== 1 ? 's' : ''}
-          </div>
-        </div>
-                
-                <button 
-                  className="buyin-popup-btn plus"
-                  onClick={() => {
-                    const newCount = buyInPopupPlayer.buyInCount + 1;
-                    const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
-                    const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
-                    const newTotal = buyInCost + addOnCostParsed;
-                    
-                    handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
-                    setBuyInPopupPlayer({
-                      ...buyInPopupPlayer,
-                      buyInCount: newCount,
-                      owedAmount: newTotal
-                    });
-                  }}
-                >
-                  +
-                </button>
-              </div>
+              {/* Cash Game: Manual Buy-In Amount Entry */}
+              {buyInPopupPlayer.isCashGame ? (
+                <div style={{ marginBottom: '30px' }}>
+                  <label style={{ display: 'block', marginBottom: '10px', fontSize: '0.95rem', fontWeight: '600', color: '#374151' }}>
+                    Buy-In Amount ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Enter amount"
+                    value={cashBuyInAmount}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCashBuyInAmount(value);
+                      // Update owed amount in real-time
+                      const amount = parseFloat(value) || 0;
+                      setBuyInPopupPlayer({
+                        ...buyInPopupPlayer,
+                        owedAmount: amount
+                      });
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '15px',
+                      fontSize: '1.5rem',
+                      textAlign: 'center',
+                      border: '2px solid #d1d5db',
+                      borderRadius: '8px',
+                      fontWeight: '600'
+                    }}
+                    autoFocus
+                  />
+                  <p style={{ marginTop: '10px', fontSize: '0.85rem', color: '#6b7280', textAlign: 'center' }}>
+                    Enter the amount this player is buying in for
+                  </p>
+                </div>
+              ) : (
+                /* Tournament: Buy-In Count Controls */
+                <div className="buyin-popup-controls">
+                  <button 
+                    className="buyin-popup-btn minus"
+                    onClick={() => {
+                      const newCount = Math.max(0, buyInPopupPlayer.buyInCount - 1);
+                      const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
+                      const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
+                      const newTotal = buyInCost + addOnCostParsed;
+                      
+                      handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
+                      setBuyInPopupPlayer({
+                        ...buyInPopupPlayer,
+                        buyInCount: newCount,
+                        owedAmount: newTotal
+                      });
+                    }}
+                    disabled={buyInPopupPlayer.buyInCount === 0}
+                  >
+                    −
+                  </button>
+                  
+                  <div className="buyin-popup-display">
+                    <div className="buyin-popup-count">{buyInPopupPlayer.buyInCount}</div>
+                    <div className="buyin-popup-label">
+                      buy-in{buyInPopupPlayer.buyInCount !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  
+                  <button 
+                    className="buyin-popup-btn plus"
+                    onClick={() => {
+                      const newCount = buyInPopupPlayer.buyInCount + 1;
+                      const buyInCost = newCount * (parseFloat(gameConfig?.buyInAmount) || 0);
+                      const addOnCostParsed = buyInPopupPlayer.addOnPurchased ? parseFloat(String(gameConfig?.addOnCost || 0).replace('$', '')) : 0;
+                      const newTotal = buyInCost + addOnCostParsed;
+                      
+                      handleUpdateBuyInCount(buyInPopupPlayer.seatId, newCount, buyInPopupPlayer.addOnPurchased);
+                      setBuyInPopupPlayer({
+                        ...buyInPopupPlayer,
+                        buyInCount: newCount,
+                        owedAmount: newTotal
+                      });
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+              )}
               
-              {/* Add-On Checkbox (only show if add-ons are enabled) */}
-              {gameConfig?.enableAddOn && (
+              {/* Add-On Checkbox (only show for tournaments with add-ons enabled) */}
+              {!buyInPopupPlayer.isCashGame && gameConfig?.enableAddOn && (
                 <div className="buyin-addon-container">
                   <label className="buyin-addon-label">
                     <input
@@ -1249,7 +1328,15 @@ function PokerTable() {
                 
                 <button 
                   className="buyin-popup-done"
-                  onClick={() => setBuyInPopupPlayer(null)}
+                  onClick={() => {
+                    // For cash games, save the custom amount
+                    if (buyInPopupPlayer.isCashGame && cashBuyInAmount) {
+                      const amount = parseFloat(cashBuyInAmount) || 0;
+                      handleUpdateBuyInCount(buyInPopupPlayer.seatId, 1, false, amount);
+                    }
+                    setBuyInPopupPlayer(null);
+                    setCashBuyInAmount('');
+                  }}
                 >
                   Done
                 </button>

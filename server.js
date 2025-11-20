@@ -492,7 +492,7 @@ app.delete('/api/games/:gameId/reservations/:seatId', async (req, res) => {
 app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => {
   try {
     const { gameId, seatId } = req.params;
-    const { tableNumber, buyInCount, userEmail, buyInAmount, addOnPurchased, addOnCost } = req.body;
+    const { tableNumber, buyInCount, userEmail, buyInAmount, customBuyInAmount, addOnPurchased, addOnCost } = req.body;
     const table = parseInt(tableNumber) || 1;
 
     // Check if userEmail is provided
@@ -502,7 +502,7 @@ app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => 
 
     // Check if the user is the game creator
     const gameResult = await db.query(
-      'SELECT created_by FROM games WHERE id = $1',
+      'SELECT created_by, config FROM games WHERE id = $1',
       [gameId]
     );
 
@@ -514,6 +514,10 @@ app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => 
       return res.status(403).json({ error: 'Only the game creator can update buy-ins' });
     }
 
+    // Get game config to check if it's a cash game
+    const gameConfig = gameResult.rows[0].config || {};
+    const isCashGame = gameConfig.gameType === 'cash';
+
     // Get current reservation
     const currentReservation = await db.query(
       'SELECT owed_amount, addon_purchased FROM reservations WHERE game_id = $1 AND seat_id = $2 AND table_number = $3',
@@ -524,19 +528,29 @@ app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => 
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
-    // Calculate new total based on buy-in count
+    // Calculate new total
+    let newTotal = 0;
     const count = Math.max(0, parseInt(buyInCount) || 0);
-    let newTotal = count * parseFloat(buyInAmount || 0);
     
-    // Add add-on cost if purchased
+    // For cash games, use custom amount if provided, otherwise use count * amount
+    // For tournaments, use count * fixed buy-in amount
+    if (isCashGame && customBuyInAmount !== null && customBuyInAmount !== undefined) {
+      // Cash game: use the custom amount directly
+      newTotal = parseFloat(customBuyInAmount) || 0;
+    } else {
+      // Tournament: calculate from count and buy-in amount
+      newTotal = count * parseFloat(buyInAmount || 0);
+    }
+    
+    // Add add-on cost if purchased (only for tournaments)
     const hasAddOn = addOnPurchased === true || addOnPurchased === 'true';
-    if (hasAddOn && addOnCost) {
+    if (hasAddOn && addOnCost && !isCashGame) {
       // Parse add-on cost (remove $ if present)
       const parsedAddOnCost = parseFloat(String(addOnCost).replace('$', ''));
       newTotal += parsedAddOnCost;
     }
     
-    const isPaid = count > 0;
+    const isPaid = newTotal > 0;
 
     // Update the buy-in count, total amount, and add-on status
     const updateResult = await db.query(
@@ -544,9 +558,13 @@ app.patch('/api/games/:gameId/reservations/:seatId/buyins', async (req, res) => 
       [isPaid, newTotal, hasAddOn, gameId, parseInt(seatId), table]
     );
 
+    const message = isCashGame 
+      ? `Buy-in amount updated to $${newTotal.toFixed(2)}`
+      : `Buy-in count updated to ${count}${hasAddOn ? ' (add-on purchased)' : ''}`;
+    
     res.json({
       success: true,
-      message: `Buy-in count updated to ${count}${hasAddOn ? ' (add-on purchased)' : ''}`,
+      message: message,
       reservation: {
         seatId: updateResult.rows[0].seat_id,
         playerName: updateResult.rows[0].player_name,
