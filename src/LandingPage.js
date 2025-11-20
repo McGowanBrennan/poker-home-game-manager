@@ -42,9 +42,9 @@ function LandingPage() {
           </div>
 
           <div className="feature-pills">
-            <div className="pill">🎮 Easy Setup</div>
-            <div className="pill">👥 Player Management</div>
-            <div className="pill">🔗 Share Links</div>
+            <div className="pill">Easy Setup</div>
+            <div className="pill">Player Management</div>
+            <div className="pill">Share Links</div>
           </div>
         </div>
       </div>

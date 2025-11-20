@@ -285,7 +285,13 @@ app.get('/api/games/:gameId', async (req, res) => {
       createdAt: game.created_at,
       gameDateTime: game.game_date_time,
       note: game.note,
-      config: game.config || null  // Config is now stored directly in database as JSONB
+      config: game.config || null,  // Config is now stored directly in database as JSONB
+      // Timer state for tournaments
+      currentBlindLevel: game.current_blind_level || 0,
+      timeRemainingSeconds: game.time_remaining_seconds,
+      timerRunning: game.timer_running || false,
+      timerPaused: game.timer_paused || false,
+      timerLastUpdate: game.timer_last_update
     });
   } catch (error) {
     console.error('Error fetching game:', error);
@@ -720,13 +726,11 @@ app.post('/api/games/:gameId/update-details', async (req, res) => {
   }
 });
 
-// Update tournament status
-app.post('/api/games/:gameId/status', async (req, res) => {
+// Update tournament timer state
+app.post('/api/games/:gameId/timer-state', async (req, res) => {
   try {
     const { gameId } = req.params;
-    const { userEmail, status } = req.body;
-
-    console.log('Update tournament status request:', { gameId, userEmail, status });
+    const { userEmail, currentBlindLevel, timeRemainingSeconds, timerRunning, timerPaused } = req.body;
 
     // Check if userEmail is provided
     if (!userEmail) {
@@ -744,7 +748,69 @@ app.post('/api/games/:gameId/status', async (req, res) => {
     }
 
     if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can update timer state' });
+    }
+
+    // Update timer state in database
+    const updateResult = await db.query(
+      `UPDATE games 
+       SET current_blind_level = $1, 
+           time_remaining_seconds = $2, 
+           timer_running = $3, 
+           timer_paused = $4,
+           timer_last_update = NOW()
+       WHERE id = $5 
+       RETURNING *`,
+      [currentBlindLevel, timeRemainingSeconds, timerRunning, timerPaused, gameId]
+    );
+
+    res.json({ 
+      success: true,
+      timerState: {
+        currentBlindLevel: updateResult.rows[0].current_blind_level,
+        timeRemainingSeconds: updateResult.rows[0].time_remaining_seconds,
+        timerRunning: updateResult.rows[0].timer_running,
+        timerPaused: updateResult.rows[0].timer_paused
+      }
+    });
+  } catch (error) {
+    console.error('Error updating timer state:', error);
+    res.status(500).json({ error: 'Failed to update timer state' });
+  }
+});
+
+// Update tournament status
+app.post('/api/games/:gameId/status', async (req, res) => {
+  try {
+    const { gameId } = req.params;
+    const { userEmail, status } = req.body;
+
+    console.log('Update tournament status request:', { gameId, userEmail, status });
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by, config FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
       return res.status(403).json({ error: 'Only the game creator can update tournament status' });
+    }
+
+    // Prevent status changes from "Finished"
+    const currentConfig = gameResult.rows[0].config || {};
+    const currentStatus = currentConfig.tournamentStatus || 'Registering';
+    if (currentStatus === 'Finished') {
+      return res.status(400).json({ error: 'Cannot change status from Finished. Tournament is complete.' });
     }
 
     // Update status in game configuration (stored in database)
@@ -768,6 +834,93 @@ app.post('/api/games/:gameId/status', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to update tournament status',
       details: error.message 
+    });
+  }
+});
+
+// Save tournament results
+app.post('/api/games/:gameId/results', async (req, res) => {
+  console.log('📥 Results endpoint hit:', req.method, req.path, req.params);
+  try {
+    const { gameId } = req.params;
+    const { userEmail, results } = req.body;
+
+    console.log('Save tournament results request:', { 
+      gameId, 
+      userEmail, 
+      resultsCount: results?.length,
+      results: results
+    });
+
+    // Check if userEmail is provided
+    if (!userEmail) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
+    // Check if the user is the game creator
+    const gameResult = await db.query(
+      'SELECT created_by FROM games WHERE id = $1',
+      [gameId]
+    );
+
+    if (gameResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Game not found' });
+    }
+
+    if (gameResult.rows[0].created_by !== userEmail) {
+      return res.status(403).json({ error: 'Only the game creator can save tournament results' });
+    }
+
+    // Validate results
+    if (!Array.isArray(results) || results.length === 0) {
+      return res.status(400).json({ error: 'Results must be a non-empty array' });
+    }
+
+    // Validate each result has required fields
+    for (const result of results) {
+      if (!result.position || !result.playerName || result.amount === undefined) {
+        return res.status(400).json({ 
+          error: 'Each result must have position, playerName, and amount fields',
+          invalidResult: result
+        });
+      }
+    }
+
+    // Update results in game configuration
+    // Note: jsonb_set expects the value to be a JSONB type, so we need to cast the stringified JSON
+    try {
+      const resultString = JSON.stringify(results);
+      console.log('Attempting to save results:', resultString);
+      
+      const updateResult = await db.query(
+        `UPDATE games 
+         SET config = jsonb_set(
+           COALESCE(config, '{}'::jsonb), 
+           '{tournamentResults}', 
+           $1::jsonb
+         )
+         WHERE id = $2
+         RETURNING config`,
+        [resultString, gameId]
+      );
+
+      console.log('Results saved successfully:', updateResult.rows[0]?.config?.tournamentResults);
+
+      res.json({ 
+        success: true,
+        results
+      });
+    } catch (dbError) {
+      console.error('Database error saving tournament results:', dbError);
+      throw dbError;
+    }
+  } catch (error) {
+    console.error('Error saving tournament results:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to save tournament results',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -1190,6 +1343,9 @@ async function testDatabaseConnection() {
 
 app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log('📋 Registered API routes:');
+  console.log('   POST /api/games/:gameId/results');
+  console.log('   POST /api/games/:gameId/status');
   console.log(`Reservations API available at http://localhost:${PORT}/api/reservations`);
   console.log(`Games API available at http://localhost:${PORT}/api/games`);
   console.log(`Groups API available at http://localhost:${PORT}/api/groups`);

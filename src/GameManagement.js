@@ -33,6 +33,17 @@ function GameManagement() {
   const [tournamentPlayerInput, setTournamentPlayerInput] = useState('');
   const [userCode, setUserCode] = useState('');
   
+  // Step navigation state
+  const [currentStep, setCurrentStep] = useState(0);
+  const tournamentSteps = [
+    { id: 'config', name: 'Game Settings', modal: 'showGameConfig' },
+    { id: 'players', name: 'Players', modal: 'showPlayerListQuestion' },
+    { id: 'playerList', name: 'Player List', modal: 'showPlayerSelection' },
+    { id: 'blinds', name: 'Blind Structure', modal: 'showBlindStructureQuestion' },
+    { id: 'blindBuilder', name: 'Blind Builder', modal: 'showBlindStructureBuilder' },
+    { id: 'prizePool', name: 'Prize Pool', modal: 'showPrizePoolConfig' }
+  ];
+  
   // Blind structure state
   const [showBlindStructureQuestion, setShowBlindStructureQuestion] = useState(false);
   const [showBlindStructureBuilder, setShowBlindStructureBuilder] = useState(false);
@@ -140,20 +151,89 @@ function GameManagement() {
     }
   };
 
+  // Step navigation functions
+  const navigateToStep = (stepIndex) => {
+    // Close all modals first
+    setShowGameConfig(false);
+    setShowPlayerListQuestion(false);
+    setShowPlayerSelection(false);
+    setShowBlindStructureQuestion(false);
+    setShowBlindStructureBuilder(false);
+    setShowCustomBlindBuilder(false);
+    setShowPrizePoolConfig(false);
+    
+    // Open the modal for the target step
+    const step = tournamentSteps[stepIndex];
+    if (step) {
+      switch(step.modal) {
+        case 'showGameConfig':
+          setShowGameConfig(true);
+          break;
+        case 'showPlayerListQuestion':
+          setShowPlayerListQuestion(true);
+          break;
+        case 'showPlayerSelection':
+          setShowPlayerSelection(true);
+          break;
+        case 'showBlindStructureQuestion':
+          setShowBlindStructureQuestion(true);
+          break;
+        case 'showBlindStructureBuilder':
+          setShowBlindStructureBuilder(true);
+          break;
+        case 'showPrizePoolConfig':
+          setShowPrizePoolConfig(true);
+          break;
+      }
+      setCurrentStep(stepIndex);
+    }
+  };
+
+  const getCurrentStepIndex = () => {
+    if (showGameConfig) return 0;
+    if (showPlayerListQuestion) return 1;
+    if (showPlayerSelection) return 2;
+    if (showBlindStructureQuestion) return 3;
+    if (showBlindStructureBuilder || showCustomBlindBuilder) return 4;
+    if (showPrizePoolConfig) return 5;
+    return 0;
+  };
+
+  const handleNextStep = () => {
+    const nextStep = getCurrentStepIndex() + 1;
+    if (nextStep < tournamentSteps.length) {
+      navigateToStep(nextStep);
+    }
+  };
+
+  const handlePreviousStep = () => {
+    const prevStep = getCurrentStepIndex() - 1;
+    if (prevStep >= 0) {
+      navigateToStep(prevStep);
+    }
+  };
+
+  const canGoNext = () => {
+    const current = getCurrentStepIndex();
+    // Add validation logic here if needed
+    return current < tournamentSteps.length - 1;
+  };
+
+  const canGoPrevious = () => {
+    return getCurrentStepIndex() > 0;
+  };
+
   // Tournament flow handlers
   const handleTournamentClick = () => {
-    setShowGameConfig(false);
-    setShowPlayerListQuestion(true);
+    navigateToStep(1); // Go to player list question
   };
 
   const handlePlayerListReady = () => {
-    setShowPlayerListQuestion(false);
-    setShowPlayerSelection(true);
+    navigateToStep(2); // Go to player selection
   };
 
   const handlePlayerListNotReady = () => {
-    setShowPlayerListQuestion(false);
-    setShowGameConfig(true);
+    navigateToStep(0); // Go back to game config
     setGameConfig({ ...gameConfig, gameType: 'tournament', playerList: [] });
   };
 
@@ -185,24 +265,22 @@ function GameManagement() {
     const playersPerTable = gameConfig.playersPerTable || 10;
     const calculatedTables = Math.ceil(tournamentPlayers.length / playersPerTable);
     
-    setShowPlayerSelection(false);
-    setShowGameConfig(true);
     setGameConfig({ 
       ...gameConfig, 
       gameType: 'tournament', 
       playerList: tournamentPlayers,
       numberOfTables: calculatedTables
     });
+    
+    navigateToStep(0); // Go back to game config with players set
   };
 
   const handleBackFromPlayerSelection = () => {
-    setShowPlayerSelection(false);
-    setShowPlayerListQuestion(true);
+    navigateToStep(1); // Go back to player list question
   };
 
   const handleBackFromPlayerListQuestion = () => {
-    setShowPlayerListQuestion(false);
-    setShowGameConfig(true);
+    navigateToStep(0); // Go back to game config
     setGameConfig({ ...gameConfig, gameType: '' });
   };
 
@@ -216,6 +294,7 @@ function GameManagement() {
     setShowSaveStructure(false);
     setShowLoadStructure(false);
     setShowPrizePoolConfig(false);
+    setCurrentStep(0);
     setTournamentPlayers([]);
     setTournamentPlayerInput('');
     setChipSet('standard');
@@ -340,8 +419,7 @@ function GameManagement() {
 
     // If it's a tournament, show blind structure question
     if (gameConfig.gameType === 'tournament') {
-      setShowGameConfig(false);
-      setShowBlindStructureQuestion(true);
+      navigateToStep(3); // Go to blind structure question
     } else {
       // For cash games, create directly
       createGameOnServer();
@@ -352,26 +430,25 @@ function GameManagement() {
   const handleUseOwnBlindStructure = () => {
     setShowBlindStructureQuestion(false);
     setShowCustomBlindBuilder(true);
+    setCurrentStep(4); // Update step to blind builder
   };
 
   const handleUseBuiltInBlindStructure = () => {
     setShowBlindStructureQuestion(false);
     setShowBlindStructureBuilder(true);
+    setCurrentStep(4); // Update step to blind builder
   };
 
   const handleBackFromBlindQuestion = () => {
-    setShowBlindStructureQuestion(false);
-    setShowGameConfig(true);
+    navigateToStep(0); // Go back to game config
   };
 
   const handleBackFromBlindBuilder = () => {
-    setShowBlindStructureBuilder(false);
-    setShowBlindStructureQuestion(true);
+    navigateToStep(3); // Go back to blind structure question
   };
 
   const handleBackFromCustomBuilder = () => {
-    setShowCustomBlindBuilder(false);
-    setShowBlindStructureQuestion(true);
+    navigateToStep(3); // Go back to blind structure question
   };
 
   const handleSaveStructure = () => {
@@ -575,8 +652,7 @@ function GameManagement() {
     // Save blind structure to state
     setGameConfig(prev => ({ ...prev, blindStructure: structure }));
     
-    setShowCustomBlindBuilder(false);
-    setShowPrizePoolConfig(true); // Go to prize pool config
+    navigateToStep(5); // Go to prize pool config
   };
 
   const handleGenerateBlindStructure = () => {
@@ -586,8 +662,7 @@ function GameManagement() {
     // Save blind structure to state
     setGameConfig(prev => ({ ...prev, blindStructure: structure }));
     
-    setShowBlindStructureBuilder(false);
-    setShowPrizePoolConfig(true); // Go to prize pool config
+    navigateToStep(5); // Go to prize pool config
   };
 
   // Prize pool configuration handlers
@@ -658,8 +733,7 @@ function GameManagement() {
   };
 
   const handleBackFromPrizePool = () => {
-    setShowPrizePoolConfig(false);
-    setShowCustomBlindBuilder(true); // Go back to last modal
+    navigateToStep(4); // Go back to blind builder
   };
 
   // Generate a standard blind structure
@@ -1185,75 +1259,146 @@ function GameManagement() {
 
         <div className="games-section">
           <h2>Your Games</h2>
-          {games.length === 0 ? (
-            <div className="no-games">
-              <p>You haven't created any games yet.</p>
-              <p>Create a new game to get started!</p>
-            </div>
-          ) : (
-            <div className="games-list">
-              {games.map((game) => {
-                // Determine status badge color
-                const getStatusColor = (status) => {
-                  switch(status) {
-                    case 'Registering': return '#10b981'; // green
-                    case 'In Progress': return '#f59e0b'; // yellow/orange
-                    case 'Finished': return '#ef4444'; // red
-                    default: return '#6b7280'; // gray
-                  }
-                };
+          {(() => {
+            // Separate games into active and finished
+            const activeGames = games.filter(game => {
+              const status = game.config?.tournamentStatus;
+              return status !== 'Finished';
+            });
+            const finishedGames = games.filter(game => {
+              const status = game.config?.tournamentStatus;
+              return status === 'Finished';
+            });
 
-                const status = game.config?.tournamentStatus;
-                const isTournament = game.config?.gameType === 'tournament';
+            if (games.length === 0) {
+              return (
+                <div className="no-games">
+                  <p>You haven't created any games yet.</p>
+                  <p>Create a new game to get started!</p>
+                </div>
+              );
+            }
 
-                return (
-                  <div key={game.id} className="game-card">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteGame(game.id, game.name);
-                      }}
-                      className="delete-game-btn"
-                      title="Delete game"
-                    >
-                      ✕
-                    </button>
-                    <div className="game-info">
-                      <h3>{game.name}</h3>
-                      <p className="game-code">Code: {game.id}</p>
-                      {isTournament && status && (
-                        <div 
-                          className="tournament-status-badge"
-                          style={{ 
-                            backgroundColor: getStatusColor(status),
-                            color: 'white',
-                            padding: '4px 12px',
-                            borderRadius: '12px',
-                            fontSize: '0.85rem',
-                            fontWeight: '600',
-                            display: 'inline-block',
-                            marginTop: '8px',
-                            marginBottom: '4px'
-                          }}
-                        >
-                          {status}
+            // Helper function to render game card
+            const renderGameCard = (game) => {
+              const getStatusColor = (status) => {
+                switch(status) {
+                  case 'Registering': return '#10b981'; // green
+                  case 'In Progress': return '#f59e0b'; // yellow/orange
+                  case 'Finished': return '#ef4444'; // red
+                  default: return '#6b7280'; // gray
+                }
+              };
+
+              const status = game.config?.tournamentStatus;
+              const isTournament = game.config?.gameType === 'tournament';
+              const results = game.config?.tournamentResults || [];
+
+              return (
+                <div key={game.id} className="game-card">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteGame(game.id, game.name);
+                    }}
+                    className="delete-game-btn"
+                    title="Delete game"
+                  >
+                    ✕
+                  </button>
+                  <div className="game-info">
+                    <h3>{game.name}</h3>
+                    <p className="game-code">Code: {game.id}</p>
+                    {isTournament && status && (
+                      <div 
+                        className="tournament-status-badge"
+                        style={{ 
+                          backgroundColor: getStatusColor(status),
+                          color: 'white',
+                          padding: '4px 12px',
+                          borderRadius: '12px',
+                          fontSize: '0.85rem',
+                          fontWeight: '600',
+                          display: 'inline-block',
+                          marginTop: '8px',
+                          marginBottom: '4px'
+                        }}
+                      >
+                        {status}
+                      </div>
+                    )}
+                    {isTournament && status === 'Finished' && results.length > 0 && (
+                      <div style={{ 
+                        marginTop: '10px', 
+                        padding: '10px', 
+                        background: '#f9fafb', 
+                        borderRadius: '6px',
+                        border: '1px solid #e5e7eb'
+                      }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>
+                          🏆 Results:
                         </div>
-                      )}
-                      <p className="game-meta">
-                        Created {new Date(game.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => navigate(`/table/${game.id}`, { state: { userEmail } })}
-                      className="join-btn"
-                    >
-                      Enter Game
-                    </button>
+                        {results.slice(0, 3).map((result, idx) => (
+                          <div key={idx} style={{ 
+                            fontSize: '0.8rem', 
+                            color: '#6b7280',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            marginTop: '4px'
+                          }}>
+                            <span>
+                              {result.position === 1 ? '🥇' : result.position === 2 ? '🥈' : result.position === 3 ? '🥉' : `${result.position}th`} {result.playerName}
+                            </span>
+                            <span style={{ fontWeight: '600', color: '#059669' }}>
+                              ${result.amount?.toFixed(2) || '0.00'}
+                            </span>
+                          </div>
+                        ))}
+                        {results.length > 3 && (
+                          <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '4px' }}>
+                            +{results.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="game-meta">
+                      Created {new Date(game.createdAt).toLocaleDateString()}
+                    </p>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <button
+                    onClick={() => navigate(`/table/${game.id}`, { state: { userEmail } })}
+                    className="join-btn"
+                  >
+                    Enter Game
+                  </button>
+                </div>
+              );
+            };
+
+            return (
+              <>
+                {/* Active Games */}
+                {activeGames.length > 0 && (
+                  <div style={{ marginBottom: '40px' }}>
+                    <h3 style={{ fontSize: '1.2rem', marginBottom: '15px', color: '#374151' }}>Active Games</h3>
+                    <div className="games-list">
+                      {activeGames.map(renderGameCard)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Finished Tournaments */}
+                {finishedGames.length > 0 && (
+                  <div>
+                    <h3 style={{ fontSize: '1.2rem', marginBottom: '15px', color: '#374151' }}>Finished Tournaments</h3>
+                    <div className="games-list">
+                      {finishedGames.map(renderGameCard)}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Groups Section */}
@@ -1449,6 +1594,51 @@ function GameManagement() {
         {showGameConfig && (
           <div className="modal-overlay" onClick={handleExitTournamentFlow}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              {/* Step Navigation */}
+              {gameConfig.gameType === 'tournament' && (
+                <div className="step-navigation">
+                  <div className="step-indicators">
+                    {tournamentSteps.map((step, index) => {
+                      const currentStepIndex = getCurrentStepIndex();
+                      const isActive = index === currentStepIndex;
+                      const isCompleted = index < currentStepIndex;
+                      const isClickable = index <= currentStepIndex;
+                      
+                      return (
+                        <div key={step.id} className="step-indicator-group">
+                          <button
+                            className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                            onClick={() => isClickable && navigateToStep(index)}
+                            disabled={!isClickable}
+                            title={step.name}
+                          >
+                            {isCompleted ? '✓' : index + 1}
+                          </button>
+                          {index < tournamentSteps.length - 1 && (
+                            <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="step-labels">
+                    {tournamentSteps.map((step, index) => {
+                      const currentStepIndex = getCurrentStepIndex();
+                      const isActive = index === currentStepIndex;
+                      return (
+                        <span
+                          key={step.id}
+                          className={`step-label ${isActive ? 'active' : ''}`}
+                          style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                        >
+                          {step.name}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              
               <h3>Configure Game Settings</h3>
               <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
                 Choose your game type and customize settings
@@ -1758,16 +1948,25 @@ function GameManagement() {
               </div>
 
               {gameConfig.gameType && (
-                <div className="button-group" style={{ marginTop: '20px' }}>
-                  <button onClick={handleCreateGame} className="primary-btn">
-                    Create Game
-                  </button>
-                  <button 
-                    onClick={handleExitTournamentFlow} 
-                    className="secondary-btn"
-                  >
-                    Cancel
-                  </button>
+                <div className="button-group" style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    {gameConfig.gameType === 'tournament' && canGoPrevious() && (
+                      <button onClick={handlePreviousStep} className="secondary-btn">
+                        ← Back
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={handleCreateGame} className="primary-btn">
+                      {gameConfig.gameType === 'tournament' ? 'Continue →' : 'Create Game'}
+                    </button>
+                    <button 
+                      onClick={handleExitTournamentFlow} 
+                      className="secondary-btn"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1778,6 +1977,49 @@ function GameManagement() {
         {showPlayerListQuestion && (
           <div className="modal-overlay">
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <h3>Tournament Player List</h3>
               <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '0.95rem' }}>
                 Do you already have your player list ready?
@@ -1796,9 +2038,12 @@ function GameManagement() {
                 </button>
               </div>
 
-              <div className="modal-actions" style={{ marginTop: '20px' }}>
-                <button onClick={handleBackFromPlayerListQuestion} className="cancel-btn">
+              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between' }}>
+                <button onClick={handlePreviousStep} className="cancel-btn" disabled={!canGoPrevious()}>
                   ← Back
+                </button>
+                <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                  Cancel
                 </button>
               </div>
             </div>
@@ -1809,6 +2054,49 @@ function GameManagement() {
         {showPlayerSelection && (
           <div className="modal-overlay">
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflow: 'auto' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <h3>Add Tournament Players</h3>
               <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
                 Enter the names of players who will participate in this tournament ({tournamentPlayers.length} added)
@@ -1862,21 +2150,26 @@ function GameManagement() {
                 </div>
               )}
 
-              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
                 <button 
-                  onClick={handleBackFromPlayerSelection} 
+                  onClick={handlePreviousStep} 
                   className="cancel-btn"
+                  disabled={!canGoPrevious()}
                 >
                   ← Back
                 </button>
-                <button 
-                  onClick={handlePlayerSelectionComplete} 
-                  className="confirm-btn"
-                  disabled={tournamentPlayers.length === 0}
-                  style={{ flex: 1 }}
-                >
-                  Continue ({tournamentPlayers.length} players)
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flex: 1, justifyContent: 'flex-end' }}>
+                  <button 
+                    onClick={handlePlayerSelectionComplete} 
+                    className="confirm-btn"
+                    disabled={tournamentPlayers.length === 0}
+                  >
+                    Continue ({tournamentPlayers.length} players) →
+                  </button>
+                  <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1886,6 +2179,49 @@ function GameManagement() {
         {showBlindStructureQuestion && (
           <div className="modal-overlay" onClick={handleBackFromBlindQuestion}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <h3>Tournament Blind Structure</h3>
               <p style={{ color: '#6b7280', marginBottom: '30px', fontSize: '0.95rem' }}>
                 Would you like to use your own blind structure or let us help you create one?
@@ -1904,9 +2240,12 @@ function GameManagement() {
                 </button>
               </div>
 
-              <div className="modal-actions" style={{ marginTop: '20px' }}>
-                <button onClick={handleBackFromBlindQuestion} className="cancel-btn">
+              <div className="modal-actions" style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between' }}>
+                <button onClick={handlePreviousStep} className="cancel-btn" disabled={!canGoPrevious()}>
                   ← Back
+                </button>
+                <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                  Cancel
                 </button>
               </div>
             </div>
@@ -1917,6 +2256,49 @@ function GameManagement() {
         {showBlindStructureBuilder && (
           <div className="modal-overlay" onClick={handleBackFromBlindBuilder}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <h3>Configure Blind Structure</h3>
               <p style={{ color: '#6b7280', marginBottom: '25px', fontSize: '0.95rem' }}>
                 Select your chip set and blind duration to generate a tournament structure
@@ -1963,17 +2345,21 @@ function GameManagement() {
                 </p>
               </div>
 
-              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={handleBackFromBlindBuilder} className="cancel-btn">
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+                <button onClick={handlePreviousStep} className="cancel-btn" disabled={!canGoPrevious()}>
                   ← Back
                 </button>
-                <button 
-                  onClick={handleGenerateBlindStructure} 
-                  className="confirm-btn"
-                  style={{ flex: 1 }}
-                >
-                  Generate Structure & Create Game
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flex: 1, justifyContent: 'flex-end' }}>
+                  <button 
+                    onClick={handleGenerateBlindStructure} 
+                    className="confirm-btn"
+                  >
+                    Continue →
+                  </button>
+                  <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1983,6 +2369,49 @@ function GameManagement() {
         {showCustomBlindBuilder && (
           <div className="modal-overlay" onClick={handleBackFromCustomBuilder}>
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '85vh', overflow: 'auto' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                 <h3 style={{ margin: 0 }}>Custom Blind Structure</h3>
                 <button 
@@ -2175,26 +2604,30 @@ function GameManagement() {
                 </div>
               )}
 
-              <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={handleBackFromCustomBuilder} className="cancel-btn">
+              <div className="modal-actions" style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+                <button onClick={handlePreviousStep} className="cancel-btn" disabled={!canGoPrevious()}>
                   ← Back
                 </button>
-                <button 
-                  onClick={handleSaveStructure}
-                  className="cancel-btn"
-                  style={{ background: '#10b981', color: 'white', border: 'none' }}
-                  disabled={customBlindLevels.length === 0}
-                >
-                  💾 Save Structure
-                </button>
-                <button 
-                  onClick={handleCreateGameWithCustomBlinds} 
-                  className="confirm-btn"
-                  style={{ flex: 1 }}
-                  disabled={customBlindLevels.length === 0}
-                >
-                  Create Game ({customBlindLevels.length} levels)
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flex: 1, justifyContent: 'flex-end' }}>
+                  <button 
+                    onClick={handleSaveStructure}
+                    className="cancel-btn"
+                    style={{ background: '#10b981', color: 'white', border: 'none' }}
+                    disabled={customBlindLevels.length === 0}
+                  >
+                    💾 Save Structure
+                  </button>
+                  <button 
+                    onClick={handleCreateGameWithCustomBlinds} 
+                    className="confirm-btn"
+                    disabled={customBlindLevels.length === 0}
+                  >
+                    Continue → ({customBlindLevels.length} levels)
+                  </button>
+                  <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2315,6 +2748,49 @@ function GameManagement() {
         {showPrizePoolConfig && (
           <div className="modal-overlay">
             <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '700px', maxHeight: '85vh', overflow: 'auto' }}>
+              {/* Step Navigation */}
+              <div className="step-navigation">
+                <div className="step-indicators">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    const isCompleted = index < currentStepIndex;
+                    const isClickable = index <= currentStepIndex;
+                    
+                    return (
+                      <div key={step.id} className="step-indicator-group">
+                        <button
+                          className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isClickable ? 'clickable' : ''}`}
+                          onClick={() => isClickable && navigateToStep(index)}
+                          disabled={!isClickable}
+                          title={step.name}
+                        >
+                          {isCompleted ? '✓' : index + 1}
+                        </button>
+                        {index < tournamentSteps.length - 1 && (
+                          <div className={`step-connector ${isCompleted ? 'completed' : ''}`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="step-labels">
+                  {tournamentSteps.map((step, index) => {
+                    const currentStepIndex = getCurrentStepIndex();
+                    const isActive = index === currentStepIndex;
+                    return (
+                      <span
+                        key={step.id}
+                        className={`step-label ${isActive ? 'active' : ''}`}
+                        style={{ fontSize: '0.75rem', color: isActive ? '#3b82f6' : '#9ca3af' }}
+                      >
+                        {step.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              
               <h3>Prize Pool Payout Structure</h3>
               <p style={{ color: '#6b7280', marginBottom: '20px', fontSize: '0.95rem' }}>
                 Configure how the prize pool will be distributed among winners.
@@ -2488,17 +2964,23 @@ function GameManagement() {
               </div>
 
               <div className="modal-actions" style={{ display: 'flex', gap: '10px' }}>
-                <button onClick={handleBackFromPrizePool} className="cancel-btn">
-                  ← Back
-                </button>
-                <button 
-                  onClick={handleConfirmPayout}
-                  className="confirm-btn"
-                  style={{ flex: 1 }}
-                  disabled={Math.abs(calculateTotalPayout() - 100) > 0.01}
-                >
-                  Create Game
-                </button>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between', width: '100%' }}>
+                  <button onClick={handlePreviousStep} className="cancel-btn" disabled={!canGoPrevious()}>
+                    ← Back
+                  </button>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button 
+                      onClick={handleConfirmPayout}
+                      className="confirm-btn"
+                      disabled={Math.abs(calculateTotalPayout() - 100) > 0.01}
+                    >
+                      Create Game
+                    </button>
+                    <button onClick={handleExitTournamentFlow} className="secondary-btn">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
